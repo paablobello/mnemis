@@ -189,10 +189,7 @@ export const chunks = pgTable(
       t.lineStart,
       t.lineEnd,
     ),
-    embeddingIdx: index('chunks_embedding_idx').using(
-      'hnsw',
-      t.embedding.op('vector_cosine_ops'),
-    ),
+    embeddingIdx: index('chunks_embedding_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
     bodyTsvIdx: index('chunks_body_tsv_idx').using('gin', t.bodyTsv),
   }),
 );
@@ -340,7 +337,11 @@ export const sourcesRelations = relations(sources, ({ one, many }) => ({
 export const chunksRelations = relations(chunks, ({ one, many }) => ({
   source: one(sources, { fields: [chunks.sourceId], references: [sources.id] }),
   workspace: one(workspaces, { fields: [chunks.workspaceId], references: [workspaces.id] }),
-  parent: one(chunks, { fields: [chunks.parentId], references: [chunks.id], relationName: 'children' }),
+  parent: one(chunks, {
+    fields: [chunks.parentId],
+    references: [chunks.id],
+    relationName: 'children',
+  }),
   children: many(chunks, { relationName: 'children' }),
 }));
 

@@ -12,8 +12,10 @@
   },
   "scripts": {
     "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate",
-    "push": "drizzle-kit push",
+    "migrate": "drizzle-kit migrate && bun run post-migrate",
+    "push": "drizzle-kit push && bun run post-migrate",
+    "post-migrate": "node --experimental-strip-types scripts/post-migrate.ts",
+    "bootstrap": "node --experimental-strip-types scripts/bootstrap.ts",
     "studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit"
   },

@@ -1,4 +1,4 @@
-import { createDatabase, type Database } from '@mnemis/db';
+import { type Database, createDatabase } from '@mnemis/db';
 import { loadEnv } from './env.ts';
 
 let instance: Database | null = null;

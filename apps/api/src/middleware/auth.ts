@@ -20,7 +20,10 @@ function hashKey(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
-function extractKey(authHeader: string | undefined, apiKeyHeader: string | undefined): string | null {
+function extractKey(
+  authHeader: string | undefined,
+  apiKeyHeader: string | undefined,
+): string | null {
   if (apiKeyHeader) return apiKeyHeader.trim();
   if (authHeader?.startsWith('Bearer ')) return authHeader.slice(7).trim();
   return null;
