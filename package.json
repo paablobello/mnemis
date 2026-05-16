@@ -1,0 +1,35 @@
+{
+  "name": "mnemis",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open-source memory and context platform for AI agents",
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*", "services/*"],
+  "packageManager": "bun@1.3.1",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:generate": "bun --filter @mnemis/db generate",
+    "db:migrate": "bun --filter @mnemis/db migrate",
+    "db:push": "bun --filter @mnemis/db push",
+    "db:studio": "bun --filter @mnemis/db studio",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "docker:logs": "docker compose -f docker/docker-compose.yml logs -f",
+    "api:dev": "bun --filter @mnemis/api dev"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "turbo": "^2.5.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "bun": ">=1.3.0"
+  }
+}
