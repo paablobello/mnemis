@@ -29,6 +29,8 @@ const TEST_SLUG = `test-${randomBytes(4).toString('hex')}`;
 const TEST_EMAIL = `${TEST_SLUG}@mnemis.test`;
 const RAW_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const KEY_HASH = createHash('sha256').update(RAW_KEY).digest('hex');
+const READ_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
+const READ_ONLY_HASH = createHash('sha256').update(READ_ONLY_KEY).digest('hex');
 
 let workspaceId = '';
 let userId = '';
@@ -36,6 +38,11 @@ let userId = '';
 const headers = () => ({
   'content-type': 'application/json',
   authorization: `Bearer ${RAW_KEY}`,
+});
+
+const headersFor = (key: string) => ({
+  'content-type': 'application/json',
+  authorization: `Bearer ${key}`,
 });
 
 before(async () => {
@@ -55,6 +62,13 @@ before(async () => {
     keyHash: KEY_HASH,
     prefix: RAW_KEY.slice(0, 11),
     scopes: ['memories:*', 'search:*', 'admin:*'],
+  });
+  await db.insert(apiKeys).values({
+    workspaceId,
+    name: 'read-only',
+    keyHash: READ_ONLY_HASH,
+    prefix: READ_ONLY_KEY.slice(0, 11),
+    scopes: ['memories:read'],
   });
 });
 
@@ -82,6 +96,25 @@ describe('auth', () => {
   it('accepts valid key', async () => {
     const res = await app.request('/v1/memories', { headers: headers() });
     assert.equal(res.status, 200);
+  });
+
+  it('rejects keys without the required scope', async () => {
+    const write = await app.request('/v1/memories', {
+      method: 'POST',
+      headers: headersFor(READ_ONLY_KEY),
+      body: JSON.stringify({
+        kind: 'fact',
+        title: 'scope check',
+        summary: 'scope check',
+        body: 'this write must be rejected',
+      }),
+    });
+    assert.equal(write.status, 403);
+    const body = await write.json();
+    assert.equal(body.error, 'insufficient_scope');
+
+    const read = await app.request('/v1/memories', { headers: headersFor(READ_ONLY_KEY) });
+    assert.equal(read.status, 200);
   });
 });
 
@@ -273,6 +306,14 @@ describe('semantic-search graceful fallback', () => {
 });
 
 describe('TTL sweep', () => {
+  it('requires admin scope', async () => {
+    const sweep = await app.request('/v1/admin/sweep', {
+      method: 'POST',
+      headers: headersFor(READ_ONLY_KEY),
+    });
+    assert.equal(sweep.status, 403);
+  });
+
   it('archives a memory whose expires_at is in the past', async () => {
     // Create a working memory then forcibly backdate created_at so expires_at < now()
     const create = await app.request('/v1/memories', {
@@ -305,5 +346,45 @@ describe('TTL sweep', () => {
     const fetched = await app.request(`/v1/memories/${id}?include=lineage`, { headers: headers() });
     const fetchedJson = await fetched.json();
     assert.ok(fetchedJson.data.archived_at !== null);
+  });
+
+  it('only sweeps expired memories in the authenticated workspace', async () => {
+    const otherSlug = `other-${randomBytes(4).toString('hex')}`;
+    const [otherUser] = await db
+      .insert(users)
+      .values({ email: `${otherSlug}@mnemis.test`, name: otherSlug })
+      .returning({ id: users.id });
+    const [otherWs] = await db
+      .insert(workspaces)
+      .values({ slug: otherSlug, name: otherSlug, ownerId: otherUser!.id })
+      .returning({ id: workspaces.id });
+
+    try {
+      const [otherMemory] = await db
+        .insert(memories)
+        .values({
+          workspaceId: otherWs!.id,
+          kind: 'working',
+          title: 'other expired',
+          summary: 'other expired',
+          body: 'this belongs to another workspace',
+          ttlSeconds: 1,
+          createdAt: sql`now() - interval '1 hour'`,
+        })
+        .returning({ id: memories.id });
+
+      const sweep = await app.request('/v1/admin/sweep', { method: 'POST', headers: headers() });
+      assert.equal(sweep.status, 200);
+
+      const [row] = await db
+        .select({ archivedAt: memories.archivedAt })
+        .from(memories)
+        .where(eq(memories.id, otherMemory!.id))
+        .limit(1);
+      assert.equal(row!.archivedAt, null);
+    } finally {
+      await db.delete(workspaces).where(eq(workspaces.id, otherWs!.id));
+      await db.delete(users).where(eq(users.id, otherUser!.id));
+    }
   });
 });

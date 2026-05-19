@@ -29,6 +29,36 @@ function extractKey(
   return null;
 }
 
+function scopeMatches(granted: string, required: string): boolean {
+  if (granted === '*' || granted === required) return true;
+  if (!granted.endsWith('*')) return false;
+  return required.startsWith(granted.slice(0, -1));
+}
+
+export function hasScope(grantedScopes: readonly string[], required: string): boolean {
+  return grantedScopes.some((scope) => scopeMatches(scope, required));
+}
+
+export function requireScopes(...required: string[]): MiddlewareHandler {
+  return async (c, next) => {
+    const auth = c.get('auth');
+    const allowed = required.some((scope) => hasScope(auth.scopes, scope));
+
+    if (!allowed) {
+      return c.json(
+        {
+          error: 'insufficient_scope',
+          message: 'API key does not have the required scope',
+          required_scopes: required,
+        },
+        403,
+      );
+    }
+
+    await next();
+  };
+}
+
 /**
  * Validates the API key from `Authorization: Bearer <key>` or `X-API-Key: <key>`.
  * Looks up the hashed key in api_keys, sets workspace context on c.var.auth,

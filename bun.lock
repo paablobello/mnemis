@@ -15,9 +15,25 @@
       "dependencies": {
         "@hono/node-server": "^1.13.7",
         "@mnemis/db": "workspace:*",
+        "@mnemis/embeddings": "workspace:*",
         "drizzle-orm": "^0.36.0",
         "hono": "^4.6.10",
         "postgres": "^3.4.5",
+        "zod": "^3.23.8",
+      },
+      "devDependencies": {
+        "@mnemis/eval": "workspace:*",
+        "@types/node": "^22.9.0",
+        "typescript": "^5.6.3",
+      },
+    },
+    "apps/worker": {
+      "name": "@mnemis/worker",
+      "version": "0.0.0",
+      "dependencies": {
+        "@mnemis/db": "workspace:*",
+        "@mnemis/embeddings": "workspace:*",
+        "@mnemis/indexer": "workspace:*",
         "zod": "^3.23.8",
       },
       "devDependencies": {
@@ -35,6 +51,30 @@
       "devDependencies": {
         "@types/node": "^22.9.0",
         "drizzle-kit": "^0.28.0",
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/embeddings": {
+      "name": "@mnemis/embeddings",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^22.9.0",
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/eval": {
+      "name": "@mnemis/eval",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^22.9.0",
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/indexer": {
+      "name": "@mnemis/indexer",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^22.9.0",
         "typescript": "^5.6.3",
       },
     },
@@ -115,6 +155,14 @@
     "@mnemis/api": ["@mnemis/api@workspace:apps/api"],
 
     "@mnemis/db": ["@mnemis/db@workspace:packages/db"],
+
+    "@mnemis/embeddings": ["@mnemis/embeddings@workspace:packages/embeddings"],
+
+    "@mnemis/eval": ["@mnemis/eval@workspace:packages/eval"],
+
+    "@mnemis/indexer": ["@mnemis/indexer@workspace:packages/indexer"],
+
+    "@mnemis/worker": ["@mnemis/worker@workspace:apps/worker"],
 
     "@turbo/darwin-64": ["@turbo/darwin-64@2.9.14", "", { "os": "darwin", "cpu": "x64" }, "sha512-t7QiPflaEyBE4oayeZtSmu4mEfjgIrcNlNNl1z1dmIVPqEdtA7+CfTf8d7KXsOGPh6aNgWjKxyvQg9uGfDQF+A=="],
 

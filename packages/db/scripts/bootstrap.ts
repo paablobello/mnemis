@@ -78,7 +78,7 @@ try {
     name: keyName,
     keyHash: hash,
     prefix,
-    scopes: ['memories:*', 'sources:*', 'search:*'],
+    scopes: ['memories:*', 'sources:*', 'search:*', 'admin:*'],
   });
 
   console.log('');

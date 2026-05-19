@@ -298,13 +298,14 @@ export async function deleteMemory(
 /* ----------------------------------------------------------------------------
  *  Sweep — used by Sprint 2.5 cron job
  * --------------------------------------------------------------------------*/
-export async function sweepExpired(): Promise<{ archived: number }> {
+export async function sweepExpired(workspaceId: string): Promise<{ archived: number }> {
   const db = getDb();
   const result = await db
     .update(memories)
     .set({ archivedAt: sql`now()` })
     .where(
       and(
+        eq(memories.workspaceId, workspaceId),
         isNull(memories.archivedAt),
         sql`${memories.expiresAt} IS NOT NULL`,
         sql`${memories.expiresAt} <= now()`,

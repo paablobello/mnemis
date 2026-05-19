@@ -11,7 +11,18 @@
  * has no rows with embeddings yet.
  */
 import { type Memory, memories } from '@mnemis/db';
-import { type SQL, and, arrayOverlaps, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import {
+  type SQL,
+  and,
+  arrayOverlaps,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import type { MemoryKindInput } from '../validators/memories.ts';
 import { getEmbeddings } from './embeddings.ts';
@@ -50,6 +61,13 @@ function buildBaseFilters(workspaceId: string, f: SearchFilters): SQL<unknown> {
 /* ----------------------------------------------------------------------------
  *  BM25 (Postgres FTS)
  * --------------------------------------------------------------------------*/
+function broadLexicalQuery(query: string): string | null {
+  const terms = query.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]{2,}/gu) ?? [];
+  const unique = [...new Set(terms)].slice(0, 16);
+  if (unique.length <= 1) return null;
+  return unique.join(' OR ');
+}
+
 async function bm25Lookup(
   workspaceId: string,
   query: string,
@@ -58,7 +76,7 @@ async function bm25Lookup(
 ): Promise<{ id: string; score: number }[]> {
   const db = getDb();
   const base = buildBaseFilters(workspaceId, filters);
-  const rows = await db
+  const strictRows = await db
     .select({
       id: memories.id,
       score: sql<number>`ts_rank_cd(${memories.bodyTsv}, websearch_to_tsquery('english', ${query}))::float`,
@@ -72,7 +90,31 @@ async function bm25Lookup(
     )
     .orderBy(sql`ts_rank_cd(${memories.bodyTsv}, websearch_to_tsquery('english', ${query})) desc`)
     .limit(limit);
-  return rows;
+
+  if (strictRows.length >= limit) return strictRows;
+
+  const broad = broadLexicalQuery(query);
+  if (!broad) return strictRows;
+
+  const existingIds = strictRows.map((row) => row.id);
+  const excludeExisting = existingIds.length > 0 ? notInArray(memories.id, existingIds) : undefined;
+  const broadRows = await db
+    .select({
+      id: memories.id,
+      score: sql<number>`ts_rank_cd(${memories.bodyTsv}, websearch_to_tsquery('english', ${broad}))::float`,
+    })
+    .from(memories)
+    .where(
+      and(
+        base,
+        excludeExisting,
+        sql`${memories.bodyTsv} @@ websearch_to_tsquery('english', ${broad})`,
+      ) as SQL<unknown>,
+    )
+    .orderBy(sql`ts_rank_cd(${memories.bodyTsv}, websearch_to_tsquery('english', ${broad})) desc`)
+    .limit(limit - strictRows.length);
+
+  return [...strictRows, ...broadRows];
 }
 
 /* ----------------------------------------------------------------------------

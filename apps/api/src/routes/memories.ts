@@ -12,6 +12,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { ApiError } from '../errors.ts';
+import { requireScopes } from '../middleware/auth.ts';
 import {
   createMemory,
   deleteMemory,
@@ -46,7 +47,7 @@ function serializeHit(hit: SearchHit, include: Set<string>) {
   };
 }
 
-memoriesRoutes.post('/search', async (c) => {
+memoriesRoutes.post('/search', requireScopes('search:read'), async (c) => {
   const auth = c.get('auth');
   const body = await c.req.json().catch(() => {
     throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
@@ -67,7 +68,7 @@ memoriesRoutes.post('/search', async (c) => {
   });
 });
 
-memoriesRoutes.post('/semantic-search', async (c) => {
+memoriesRoutes.post('/semantic-search', requireScopes('search:read'), async (c) => {
   const auth = c.get('auth');
   const body = await c.req.json().catch(() => {
     throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
@@ -90,7 +91,7 @@ memoriesRoutes.post('/semantic-search', async (c) => {
   });
 });
 
-memoriesRoutes.post('/', async (c) => {
+memoriesRoutes.post('/', requireScopes('memories:write'), async (c) => {
   const auth = c.get('auth');
   const body = await c.req.json().catch(() => {
     throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
@@ -100,7 +101,7 @@ memoriesRoutes.post('/', async (c) => {
   return c.json({ data: toDto(created, { includeLineage: true }) }, 201);
 });
 
-memoriesRoutes.get('/', async (c) => {
+memoriesRoutes.get('/', requireScopes('memories:read'), async (c) => {
   const auth = c.get('auth');
   const query = listMemoriesQuerySchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const include = parseInclude(query.include);
@@ -133,7 +134,7 @@ memoriesRoutes.get('/', async (c) => {
   });
 });
 
-memoriesRoutes.get('/:id', async (c) => {
+memoriesRoutes.get('/:id', requireScopes('memories:read'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
   const include = parseInclude(c.req.query('include'));
@@ -146,7 +147,7 @@ memoriesRoutes.get('/:id', async (c) => {
   });
 });
 
-memoriesRoutes.patch('/:id', async (c) => {
+memoriesRoutes.patch('/:id', requireScopes('memories:write'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
   const body = await c.req.json().catch(() => {
@@ -157,7 +158,7 @@ memoriesRoutes.patch('/:id', async (c) => {
   return c.json({ data: toDto(updated, { includeLineage: true }) });
 });
 
-memoriesRoutes.delete('/:id', async (c) => {
+memoriesRoutes.delete('/:id', requireScopes('memories:delete'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
   const permanent = c.req.query('permanent') === 'true';

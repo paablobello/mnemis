@@ -59,6 +59,11 @@ CREATE TRIGGER memories_updated_at_trg
   BEFORE UPDATE ON memories
   FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
 
+DROP TRIGGER IF EXISTS sources_updated_at_trg ON sources;
+CREATE TRIGGER sources_updated_at_trg
+  BEFORE UPDATE ON sources
+  FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
+
 -- ----------------------------------------------------------------------------
 --  chunks.body_tsv  (raw_text + contextual_prefix, weighted)
 -- ----------------------------------------------------------------------------
