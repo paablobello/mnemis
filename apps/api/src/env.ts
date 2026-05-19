@@ -11,6 +11,11 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().int().positive().default(8787),
 
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
+  GITHUB_APP_ID: z.string().optional(),
+  GITHUB_APP_PRIVATE_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value ? value.replace(/\\n/g, '\n') : value)),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   VOYAGE_API_KEY: z.string().optional(),

@@ -395,4 +395,40 @@ describe('GitHub webhooks', () => {
     assert.equal(branchJson.jobs_created, 0);
     assert.equal(branchJson.skipped_branch, 1);
   });
+
+  it('skips sources whose githubInstallationId does not match the webhook installation', async () => {
+    const secondInstallationId = String(300_000 + randomBytes(4).readUInt32BE(0));
+    const mismatchRepo = `${TEST_SLUG}/mismatch-repo`;
+
+    await db.insert(githubAppInstallations).values({
+      workspaceId,
+      installationId: secondInstallationId,
+      accountLogin: `second-${TEST_SLUG}`,
+      accountType: 'Organization',
+      repositorySelection: 'selected',
+      permissions: { contents: 'read', metadata: 'read' },
+      events: ['push'],
+    });
+
+    await db.insert(sources).values({
+      workspaceId,
+      kind: 'github_repo',
+      identifier: mismatchRepo,
+      displayName: 'mismatch repo',
+      config: { branch: 'main', githubInstallationId: secondInstallationId },
+      indexStrategy: 'webhook',
+      status: 'indexed',
+    });
+
+    const res = await githubRequest({
+      event: 'push',
+      payload: pushPayload({ repo: mismatchRepo, installationId: INSTALLATION_ID }),
+    });
+    assert.equal(res.status, 202);
+    const json = await res.json();
+    assert.equal(json.matched_installations, 1);
+    assert.equal(json.matched_sources, 1);
+    assert.equal(json.skipped_installation, 1);
+    assert.equal(json.jobs_created, 0);
+  });
 });

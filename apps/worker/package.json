@@ -13,6 +13,7 @@
     "@mnemis/db": "workspace:*",
     "@mnemis/embeddings": "workspace:*",
     "@mnemis/indexer": "workspace:*",
+    "jose": "^5.9.6",
     "zod": "^3.23.8"
   },
   "devDependencies": {

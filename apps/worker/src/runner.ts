@@ -3,7 +3,14 @@ import { type Database, and, chunks, eq, jobs, sources, sql } from '@mnemis/db';
 import { type IndexSourceConfig, buildDocsSiteIndex, buildLocalSourceIndex } from '@mnemis/indexer';
 import { applyContextualPrefixes } from './contextual-prefix.ts';
 import { type EmbeddedIndexChunk, embedChunksForIndexing } from './embeddings.ts';
-import { clonePublicGitHubRepo } from './git.ts';
+import { loadEnv } from './env.ts';
+import { cloneGitHubRepo } from './git.ts';
+import {
+  GitHubAppNotConfiguredError,
+  type InstallationTokenStore,
+  createInstallationTokenStore,
+} from './github-app.ts';
+import { getActiveInstallation } from './installations.ts';
 
 type IndexJobKind = 'index_source' | 'reindex_source';
 
@@ -117,7 +124,50 @@ async function loadSourceForJob(db: Database, workspaceId: string, sourceId: str
   return source;
 }
 
-async function buildSourceIndex(source: Awaited<ReturnType<typeof loadSourceForJob>>) {
+let defaultTokenStore: InstallationTokenStore | null = null;
+
+function getDefaultTokenStore(): InstallationTokenStore {
+  if (defaultTokenStore) return defaultTokenStore;
+  const env = loadEnv();
+  defaultTokenStore = createInstallationTokenStore({
+    appId: env.GITHUB_APP_ID ?? null,
+    privateKey: env.GITHUB_APP_PRIVATE_KEY ?? null,
+  });
+  return defaultTokenStore;
+}
+
+async function resolveGitHubToken(
+  db: Database,
+  workspaceId: string,
+  installationId: string,
+  tokenStore: InstallationTokenStore,
+): Promise<string> {
+  const installation = await getActiveInstallation(db, workspaceId, installationId);
+  if (!installation) {
+    throw new Error(
+      `GitHub App installation ${installationId} is not linked to this workspace (or was removed)`,
+    );
+  }
+  if (installation.suspendedAt) {
+    throw new Error(`GitHub App installation ${installationId} is suspended`);
+  }
+  try {
+    return await tokenStore.getInstallationToken(installationId);
+  } catch (err) {
+    if (err instanceof GitHubAppNotConfiguredError) {
+      throw new Error(
+        'github_app_not_configured: set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY to index private GitHub repos',
+      );
+    }
+    throw err;
+  }
+}
+
+async function buildSourceIndex(
+  db: Database,
+  source: Awaited<ReturnType<typeof loadSourceForJob>>,
+  tokenStore: InstallationTokenStore,
+) {
   const config = asConfig(source.config);
 
   if (config.localPath) {
@@ -128,7 +178,14 @@ async function buildSourceIndex(source: Awaited<ReturnType<typeof loadSourceForJ
     const sourceConfig = asRecord(source.config);
     const branch =
       typeof sourceConfig.branch === 'string' ? String(sourceConfig.branch) : undefined;
-    const cloned = await clonePublicGitHubRepo(source.identifier, branch);
+    const installationId =
+      typeof sourceConfig.githubInstallationId === 'string'
+        ? sourceConfig.githubInstallationId
+        : null;
+    const token = installationId
+      ? await resolveGitHubToken(db, source.workspaceId, installationId, tokenStore)
+      : undefined;
+    const cloned = await cloneGitHubRepo(source.identifier, { branch, token });
     try {
       return await buildLocalSourceIndex(cloned.path, config);
     } finally {
@@ -249,7 +306,11 @@ async function markJobFailed(db: Database, jobId: string, error: unknown): Promi
     .where(eq(jobs.id, jobId));
 }
 
-export async function processIndexJob(db: Database, jobId: string): Promise<void> {
+export async function processIndexJob(
+  db: Database,
+  jobId: string,
+  tokenStore: InstallationTokenStore = getDefaultTokenStore(),
+): Promise<void> {
   const job = await getClaimedJob(db, jobId);
   let source: Awaited<ReturnType<typeof loadSourceForJob>> | null = null;
 
@@ -270,7 +331,7 @@ export async function processIndexJob(db: Database, jobId: string): Promise<void
       .where(eq(sources.id, source.id));
 
     await updateJobProgress(db, jobId, { done: 0, total: null, current: 'loading_files' });
-    const index = await buildSourceIndex(source);
+    const index = await buildSourceIndex(db, source, tokenStore);
     await updateJobProgress(db, jobId, {
       done: 0,
       total: index.chunks.length,
@@ -348,10 +409,13 @@ export async function processIndexJob(db: Database, jobId: string): Promise<void
   }
 }
 
-export async function processOneJob(db: Database): Promise<boolean> {
+export async function processOneJob(
+  db: Database,
+  tokenStore: InstallationTokenStore = getDefaultTokenStore(),
+): Promise<boolean> {
   const jobId = await claimNextIndexJob(db);
   if (!jobId) return false;
-  await processIndexJob(db, jobId);
+  await processIndexJob(db, jobId, tokenStore);
   return true;
 }
 
@@ -360,10 +424,12 @@ export async function runWorkerLoop(input: {
   pollIntervalMs: number;
   once?: boolean;
   onError?: (err: unknown) => void;
+  tokenStore?: InstallationTokenStore;
 }): Promise<void> {
+  const tokenStore = input.tokenStore ?? getDefaultTokenStore();
   while (true) {
     try {
-      const processed = await processOneJob(input.db);
+      const processed = await processOneJob(input.db, tokenStore);
       if (input.once) return;
       if (!processed) {
         await new Promise((resolve) => setTimeout(resolve, input.pollIntervalMs));

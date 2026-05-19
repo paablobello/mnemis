@@ -4,6 +4,11 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   WORKER_ONCE: z.coerce.boolean().optional().default(false),
+  GITHUB_APP_ID: z.string().optional(),
+  GITHUB_APP_PRIVATE_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value ? value.replace(/\\n/g, '\n') : value)),
 });
 
 export type WorkerEnv = z.infer<typeof envSchema>;

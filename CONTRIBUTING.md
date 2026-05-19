@@ -28,6 +28,16 @@ bun run api:dev
 
 The API should be reachable at `http://localhost:8787/health`.
 
+### Optional: GitHub App for private repos
+
+To index private GitHub repositories, register a GitHub App (Settings → Developer settings → GitHub Apps), install it on the org/account you want to index, and set:
+
+- `GITHUB_APP_ID` — numeric App ID
+- `GITHUB_APP_PRIVATE_KEY` — PKCS#8 PEM downloaded from the App settings page
+- `GITHUB_WEBHOOK_SECRET` — shared secret configured in the App's webhook section
+
+Without these vars the worker still clones **public** repos; sources that set `config.githubInstallationId` will fail with `github_app_not_configured`.
+
 ## Project structure
 
 ```
