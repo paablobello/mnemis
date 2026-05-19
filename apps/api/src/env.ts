@@ -10,6 +10,8 @@ const envSchema = z.object({
   API_HOST: z.string().default('0.0.0.0'),
   API_PORT: z.coerce.number().int().positive().default(8787),
 
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
+
   ANTHROPIC_API_KEY: z.string().optional(),
   VOYAGE_API_KEY: z.string().optional(),
   COHERE_API_KEY: z.string().optional(),

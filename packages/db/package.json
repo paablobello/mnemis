@@ -12,9 +12,11 @@
   },
   "scripts": {
     "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate && bun run post-migrate",
-    "push": "drizzle-kit push && bun run post-migrate",
-    "post-migrate": "node --experimental-strip-types scripts/post-migrate.ts",
+    "migrate": "bun run pre-migrate && drizzle-kit migrate && bun run post-migrate",
+    "push": "bun run pre-migrate && drizzle-kit push && bun run post-migrate",
+    "push:ci": "bun run pre-migrate && drizzle-kit push --force && bun run post-migrate",
+    "pre-migrate": "node --experimental-strip-types scripts/run-sql-dir.ts pre",
+    "post-migrate": "node --experimental-strip-types scripts/run-sql-dir.ts post",
     "bootstrap": "node --experimental-strip-types scripts/bootstrap.ts",
     "studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit"

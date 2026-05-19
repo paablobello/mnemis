@@ -64,6 +64,11 @@ CREATE TRIGGER sources_updated_at_trg
   BEFORE UPDATE ON sources
   FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
 
+DROP TRIGGER IF EXISTS github_app_installations_updated_at_trg ON github_app_installations;
+CREATE TRIGGER github_app_installations_updated_at_trg
+  BEFORE UPDATE ON github_app_installations
+  FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
+
 -- ----------------------------------------------------------------------------
 --  chunks.body_tsv  (raw_text + contextual_prefix, weighted)
 -- ----------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { githubInstallationIdSchema } from './github.ts';
 
 export const sourceKindSchema = z.enum(['github_repo', 'docs_site']);
 export type SourceKindInput = z.infer<typeof sourceKindSchema>;
@@ -23,6 +24,7 @@ const docsSiteIdentifier = z.string().url().max(2_000);
 export const sourceConfigSchema = z
   .object({
     branch: z.string().min(1).max(255).optional(),
+    githubInstallationId: githubInstallationIdSchema.optional(),
     includePaths: z.array(z.string().min(1).max(1_000)).max(256).optional(),
     excludePaths: z.array(z.string().min(1).max(1_000)).max(256).optional(),
     focusInstructions: z.string().min(1).max(4_000).optional(),

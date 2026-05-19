@@ -82,6 +82,35 @@ export const workspaceMembers = pgTable(
 );
 
 /* ----------------------------------------------------------------------------
+ *  github_app_installations — GitHub App installs linked to workspaces
+ * --------------------------------------------------------------------------*/
+export const githubAppInstallations = pgTable(
+  'github_app_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    installationId: text('installation_id').notNull(),
+    accountLogin: text('account_login').notNull(),
+    accountType: text('account_type'),
+    repositorySelection: text('repository_selection'),
+    permissions: jsonb('permissions').notNull().default({}),
+    events: text('events').array().notNull().default(sql`'{}'::text[]`),
+    installedAt: timestamp('installed_at', { withTimezone: true }),
+    suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    installationIdx: uniqueIndex('github_app_installations_installation_idx').on(t.installationId),
+    workspaceIdx: index('github_app_installations_workspace_idx').on(t.workspaceId),
+    accountIdx: index('github_app_installations_account_idx').on(t.accountLogin),
+  }),
+);
+
+/* ----------------------------------------------------------------------------
  *  api_keys
  * --------------------------------------------------------------------------*/
 export const apiKeys = pgTable(
@@ -324,9 +353,17 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   owner: one(users, { fields: [workspaces.ownerId], references: [users.id] }),
   members: many(workspaceMembers),
+  githubAppInstallations: many(githubAppInstallations),
   apiKeys: many(apiKeys),
   sources: many(sources),
   memories: many(memories),
+}));
+
+export const githubAppInstallationsRelations = relations(githubAppInstallations, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [githubAppInstallations.workspaceId],
+    references: [workspaces.id],
+  }),
 }));
 
 export const sourcesRelations = relations(sources, ({ one, many }) => ({
@@ -357,6 +394,7 @@ export const memoriesRelations = relations(memories, ({ one }) => ({
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Workspace = typeof workspaces.$inferSelect;
+export type GitHubAppInstallation = typeof githubAppInstallations.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type Source = typeof sources.$inferSelect;
 export type Chunk = typeof chunks.$inferSelect;

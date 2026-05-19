@@ -49,7 +49,7 @@ jobs:
         run: bun run typecheck
 
       - name: Push schema to test DB
-        run: bun run db:push
+        run: bun run db:push:ci
         env:
           DATABASE_URL: postgres://mnemis:mnemis_dev@localhost:5432/mnemis
 

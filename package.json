@@ -17,6 +17,7 @@
     "db:generate": "bun --filter @mnemis/db generate",
     "db:migrate": "bun --filter @mnemis/db migrate",
     "db:push": "bun --filter @mnemis/db push",
+    "db:push:ci": "bun --filter @mnemis/db push:ci",
     "db:studio": "bun --filter @mnemis/db studio",
     "db:bootstrap": "bun --filter @mnemis/db bootstrap",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",

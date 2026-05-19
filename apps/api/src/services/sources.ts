@@ -3,6 +3,7 @@ import { type SQL, and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import { ApiError } from '../errors.ts';
 import type { CreateSourceInput, SourceKindInput } from '../validators/sources.ts';
+import { getActiveGitHubInstallation } from './github-installations.ts';
 import { type JobDto, createJob, jobToDto, latestJobForSource } from './jobs.ts';
 
 export interface SourceDto {
@@ -67,6 +68,29 @@ function indexJobPayload(source: Source): Record<string, unknown> {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+async function validateSourceConfig(workspaceId: string, input: CreateSourceInput): Promise<void> {
+  if (input.kind !== 'github_repo') return;
+
+  const config = asRecord(input.config);
+  const installationId =
+    typeof config.githubInstallationId === 'string' ? config.githubInstallationId : null;
+  if (!installationId) return;
+
+  const installation = await getActiveGitHubInstallation(workspaceId, installationId);
+  if (!installation) {
+    throw ApiError.badRequest(
+      'github_installation_not_found',
+      'config.githubInstallationId must reference a GitHub App installation linked to this workspace',
+    );
+  }
+}
+
 async function enqueueSourceJob(
   workspaceId: string,
   source: Source,
@@ -85,6 +109,7 @@ export async function createSource(
 ): Promise<{ source: Source; job: Job | null }> {
   const db = getDb();
   const identifier = normalizeIdentifier(input.kind, input.identifier);
+  await validateSourceConfig(workspaceId, input);
 
   const existing = await db
     .select({ id: sources.id })

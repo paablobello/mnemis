@@ -7,6 +7,7 @@ import { apiKeyAuth } from './middleware/auth.ts';
 import { admin } from './routes/admin.ts';
 import { health } from './routes/health.ts';
 import { v1 } from './routes/v1.ts';
+import { webhooksRoutes } from './routes/webhooks.ts';
 import { EmbeddingsProviderError } from './services/embeddings.ts';
 
 export interface AppOptions {
@@ -33,6 +34,8 @@ export function createApp(opts: AppOptions = {}): Hono {
   );
 
   app.route('/health', health);
+
+  app.route('/v1/webhooks', webhooksRoutes);
 
   app.use('/v1/*', apiKeyAuth);
   app.route('/v1', v1);
