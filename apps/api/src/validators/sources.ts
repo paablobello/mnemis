@@ -86,10 +86,15 @@ export const listSourcesQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
+export const searchModeSchema = z.enum(['raw', 'markdown', 'synthesized']);
+export type SearchModeInput = z.infer<typeof searchModeSchema>;
+
 export const sourceSearchSchema = z
   .object({
     query: z.string().min(1).max(1_000),
     retrieval: z.enum(['keyword', 'hybrid']).optional().default('hybrid'),
+    mode: searchModeSchema.optional().default('raw'),
+    synthesisModel: z.string().min(1).max(200).optional(),
     sourceIds: z.array(z.string().uuid()).max(100).optional(),
     kinds: z.array(sourceKindSchema).max(2).optional(),
     pathPrefix: z.string().min(1).max(1_000).optional(),

@@ -349,6 +349,166 @@ describe('source chunk search', () => {
     );
   });
 
+  it('returns numbered citations and permalinks in raw mode', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        query: 'generated contextual prefix documentation retrieval',
+        sourceIds: [docsSourceId],
+        limit: 5,
+      }),
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.mode, 'raw');
+    assert.ok(Array.isArray(json.citations) && json.citations.length === json.items.length);
+    assert.equal(json.citations[0].n, 1);
+    assert.equal(json.items[0].permalink, 'https://docs.example.com/retrieval#contextual-prefixes');
+    assert.equal(json.items[0].citation_number, 1);
+  });
+
+  it('renders markdown mode with citations and permalinks', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        query: 'contextual retrieval prefixes',
+        sourceIds: [docsSourceId],
+        limit: 3,
+        mode: 'markdown',
+      }),
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.mode, 'markdown');
+    assert.equal(typeof json.markdown, 'string');
+    assert.match(json.markdown, /\[1\]/);
+    assert.match(json.markdown, /docs\/retrieval\.md/);
+    assert.match(json.markdown, /docs\.example\.com\/retrieval#contextual-prefixes/);
+    assert.ok(json.markdown.includes('```'));
+  });
+
+  it('builds github_repo permalinks from source.config.branch', async () => {
+    const [repoSource] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'github_repo',
+        identifier: 'mnemis-test/repo',
+        displayName: 'Test repo',
+        config: { branch: 'main' },
+        status: 'indexed',
+        lastIndexedAt: new Date('2026-05-19T10:00:00.000Z'),
+      })
+      .returning({ id: sources.id });
+    await db.insert(chunks).values({
+      workspaceId,
+      sourceId: repoSource!.id,
+      path: 'src/index.ts',
+      lineStart: 42,
+      lineEnd: 58,
+      rawText: 'export function indexWorkspaceForRetrieval() { /* ... */ }',
+      language: 'typescript',
+    });
+
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        query: 'indexWorkspaceForRetrieval',
+        sourceIds: [repoSource!.id],
+        limit: 1,
+        mode: 'markdown',
+      }),
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(
+      json.items[0].permalink,
+      'https://github.com/mnemis-test/repo/blob/main/src/index.ts#L42-L58',
+    );
+    assert.match(
+      json.markdown,
+      /github\.com\/mnemis-test\/repo\/blob\/main\/src\/index\.ts#L42-L58/,
+    );
+  });
+
+  it('returns 424 synthesis_unavailable when ANTHROPIC_API_KEY is missing', async () => {
+    const original = process.env.ANTHROPIC_API_KEY;
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
+    try {
+      const res = await app.request('/v1/search', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          query: 'contextual retrieval',
+          sourceIds: [docsSourceId],
+          limit: 3,
+          mode: 'synthesized',
+        }),
+      });
+      assert.equal(res.status, 424);
+      const json = await res.json();
+      assert.equal(json.error, 'synthesis_unavailable');
+    } finally {
+      if (original !== undefined) process.env.ANTHROPIC_API_KEY = original;
+    }
+  });
+
+  it('synthesizes an answer with citations when Anthropic is mocked', async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
+    const previousFetch = globalThis.fetch;
+    let capturedBody: { messages: Array<{ content: Array<{ text: string }> }> } | null = null;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url.startsWith('https://api.anthropic.com/')) {
+        capturedBody = JSON.parse(String(init?.body));
+        return new Response(
+          JSON.stringify({
+            content: [
+              {
+                type: 'text',
+                text: 'Contextual Retrieval prepends a generated prefix to each chunk [1].',
+              },
+            ],
+            usage: { input_tokens: 120, output_tokens: 32 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return previousFetch(input, init);
+    }) as typeof fetch;
+
+    try {
+      const res = await app.request('/v1/search', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          query: 'how does contextual retrieval work',
+          sourceIds: [docsSourceId],
+          limit: 3,
+          mode: 'synthesized',
+        }),
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.mode, 'synthesized');
+      assert.match(json.answer, /\[1\]/);
+      assert.equal(json.synthesis_model, 'claude-3-5-haiku-latest');
+      assert.equal(json.synthesis_usage.input_tokens, 120);
+      assert.ok(capturedBody, 'expected Anthropic to be called');
+      assert.match(
+        capturedBody.messages[0]!.content[0]!.text,
+        /how does contextual retrieval work/,
+      );
+      assert.match(capturedBody.messages[0]!.content[0]!.text, /Sources:/);
+    } finally {
+      globalThis.fetch = previousFetch;
+      Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');
+    }
+  });
+
   it('uses vector retrieval when embeddings are configured', async () => {
     process.env.VOYAGE_API_KEY = 'test-voyage-key';
     resetEmbeddingsForTests();
