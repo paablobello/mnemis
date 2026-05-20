@@ -1,0 +1,85 @@
+[
+  {
+    "id": "q1-cli-auth",
+    "query": "how do I authenticate the CLI",
+    "relevant": {
+      "apps/cli/src/credentials.ts": 3,
+      "apps/cli/src/commands.ts": 2,
+      "docs/cli-sdk.md": 2
+    }
+  },
+  {
+    "id": "q2-github-webhook",
+    "query": "where is the GitHub push webhook handled",
+    "relevant": {
+      "apps/api/src/services/github-webhooks.ts": 3,
+      "apps/api/src/routes/webhooks.ts": 2
+    }
+  },
+  {
+    "id": "q3-cron-parser",
+    "query": "how does the cron parser support shortcuts like at-daily",
+    "relevant": {
+      "apps/worker/src/cron.ts": 3,
+      "apps/worker/tests/indexing.test.ts": 1
+    }
+  },
+  {
+    "id": "q4-reranker",
+    "query": "what reranker options does Mnemis support",
+    "relevant": {
+      "apps/api/src/services/rerank.ts": 3,
+      "packages/embeddings/src/local-reranker.ts": 3,
+      "packages/embeddings/src/index.ts": 2,
+      "docs/cli-sdk.md": 1
+    }
+  },
+  {
+    "id": "q5-github-app-tokens",
+    "query": "how does Mnemis generate GitHub App installation access tokens",
+    "relevant": {
+      "apps/worker/src/github-app.ts": 3,
+      "apps/worker/src/runner.ts": 1
+    }
+  },
+  {
+    "id": "q6-source-indexing-pipeline",
+    "query": "how is a github repo cloned and chunked during indexing",
+    "relevant": {
+      "apps/worker/src/runner.ts": 3,
+      "apps/worker/src/git.ts": 3,
+      "packages/indexer/src/chunker.ts": 2
+    }
+  },
+  {
+    "id": "q7-db-schema-chunks",
+    "query": "what is the database schema for chunks and parent links",
+    "relevant": {
+      "packages/db/src/schema.ts": 3
+    }
+  },
+  {
+    "id": "q8-mcp-tools",
+    "query": "which MCP tools does the server expose",
+    "relevant": {
+      "apps/mcp/src/tools.ts": 3,
+      "apps/mcp/src/index.ts": 2
+    }
+  },
+  {
+    "id": "q9-permalink-commit-sha",
+    "query": "how are GitHub permalinks built with commit SHA",
+    "relevant": {
+      "apps/api/src/services/search-render.ts": 3,
+      "apps/worker/src/git.ts": 1
+    }
+  },
+  {
+    "id": "q10-contextual-retrieval",
+    "query": "how is contextual retrieval applied during indexing",
+    "relevant": {
+      "apps/worker/src/contextual-prefix.ts": 3,
+      "docs/research/tech-decisions.md": 1
+    }
+  }
+]

@@ -12,6 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
+  "dependencies": {
+    "@huggingface/transformers": "^3.3.0"
+  },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "typescript": "^5.6.3"

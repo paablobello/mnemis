@@ -27,7 +27,8 @@
     "worker:dev": "bun --filter @mnemis/worker dev",
     "mcp:dev": "bun --filter @mnemis/mcp dev",
     "cli": "bun --filter @mnemis/cli start",
-    "test:local": "DATABASE_URL=postgres://mnemis:mnemis_dev@localhost:5433/mnemis INTERNAL_AUTH_SECRET=test-secret MNEMIS_ALLOW_LOCAL_SOURCES=true bun run test"
+    "test:local": "DATABASE_URL=postgres://mnemis:mnemis_dev@localhost:5433/mnemis INTERNAL_AUTH_SECRET=test-secret MNEMIS_ALLOW_LOCAL_SOURCES=true bun run test",
+    "benchmark": "bun --filter @mnemis/eval benchmark"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

@@ -10,7 +10,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/*.test.ts"
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "benchmark": "node --experimental-strip-types scripts/run-benchmark.ts"
+  },
+  "dependencies": {
+    "@mnemis/sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

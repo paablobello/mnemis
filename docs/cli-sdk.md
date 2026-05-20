@@ -149,6 +149,35 @@ Docs crawling defaults to `docsCrawler: 'auto'`: it uses Firecrawl when
 `FIRECRAWL_API_KEY` is configured and otherwise falls back to the native
 same-origin crawler.
 
-Search reranking is optional. Set `MNEMIS_RERANK_PROVIDER=voyage` and
-`VOYAGE_API_KEY` to rerank the post-fusion candidate pool with Voyage; leave it
-unset for the current Postgres full-text/vector RRF behavior.
+Search reranking is optional and supports two providers:
+
+- `MNEMIS_RERANK_PROVIDER=voyage` plus `VOYAGE_API_KEY` — calls Voyage's
+  rerank-2.5 API on the post-fusion candidate pool. Lowest latency, requires
+  internet egress.
+- `MNEMIS_RERANK_PROVIDER=local` — runs `Xenova/bge-reranker-v2-m3` locally
+  via `@huggingface/transformers` (ONNX runtime). The model (~140MB
+  quantized) downloads on first use into the Transformers cache directory;
+  subsequent reranks are local-only. Override the model with
+  `MNEMIS_LOCAL_RERANK_MODEL=<huggingface-id>` if you ship a different
+  cross-encoder.
+
+Leaving `MNEMIS_RERANK_PROVIDER` unset keeps the pure Postgres BM25 + vector
+RRF fusion already used today.
+
+## Retrieval benchmark
+
+`packages/eval/data/mnemis-self/queries.json` ships a small curated dataset
+that questions the Mnemis repo itself. Run it against a live API + worker
+to compare retrieval variants:
+
+```bash
+export MNEMIS_API_URL=http://localhost:8787
+export MNEMIS_API_KEY=mn_test_...
+bun run benchmark
+```
+
+The script registers a one-off source with `config.localPath` pointing at the
+repo root, waits for indexing, runs every query under `keyword` and `hybrid`
+retrieval, and prints nDCG@10, MRR@10 and Recall@5. Set
+`MNEMIS_RERANK_PROVIDER` on the API process to evaluate Voyage or local
+rerank — the script reports the active provider for traceability.

@@ -1,4 +1,9 @@
-import { type VoyageRerankModel, getVoyageReranker } from '@mnemis/embeddings';
+import {
+  type LocalRerankerClient,
+  type VoyageRerankModel,
+  getLocalReranker,
+  getVoyageReranker,
+} from '@mnemis/embeddings';
 
 const MAX_RERANK_DOCUMENT_CHARS = 12_000;
 const DEFAULT_RERANK_MODEL: VoyageRerankModel = 'rerank-2.5';
@@ -16,9 +21,17 @@ export interface Rerankable {
   sectionPath?: string[];
 }
 
-function rerankerProvider(): 'none' | 'voyage' {
+type RerankProvider = 'none' | 'voyage' | 'local';
+
+function rerankerProvider(): RerankProvider {
   const provider = process.env.MNEMIS_RERANK_PROVIDER?.trim().toLowerCase();
-  return provider === 'voyage' ? 'voyage' : 'none';
+  if (provider === 'voyage') return 'voyage';
+  if (provider === 'local') return 'local';
+  return 'none';
+}
+
+function localRerankerModel(): string | undefined {
+  return process.env.MNEMIS_LOCAL_RERANK_MODEL?.trim() || undefined;
 }
 
 function rerankerModel(): VoyageRerankModel {
@@ -45,6 +58,37 @@ function documentForRerank(item: Rerankable): string {
     .slice(0, MAX_RERANK_DOCUMENT_CHARS);
 }
 
+interface RerankClient {
+  rerank(
+    query: string,
+    documents: string[],
+    opts: { topK: number },
+  ): Promise<{
+    results: Array<{ index: number; relevanceScore: number }>;
+    model: string;
+    totalTokens: number;
+  }>;
+}
+
+function buildRerankClient(provider: RerankProvider): RerankClient | null {
+  if (provider === 'voyage') {
+    const model = rerankerModel();
+    const client = getVoyageReranker({ defaultModel: model });
+    if (!client) return null;
+    return {
+      rerank: (query, documents, opts) =>
+        client.rerank(query, documents, { model, topK: opts.topK }),
+    };
+  }
+  if (provider === 'local') {
+    const localClient: LocalRerankerClient = getLocalReranker({ modelId: localRerankerModel() });
+    return {
+      rerank: (query, documents, opts) => localClient.rerank(query, documents, { topK: opts.topK }),
+    };
+  }
+  return null;
+}
+
 export async function maybeRerank<T extends object>(
   query: string,
   hits: T[],
@@ -58,8 +102,7 @@ export async function maybeRerank<T extends object>(
     };
   }
 
-  const model = rerankerModel();
-  const client = getVoyageReranker({ defaultModel: model });
+  const client = buildRerankClient(rerankerProvider());
   if (!client) {
     return {
       hits: hits.slice(0, limit),
@@ -68,9 +111,9 @@ export async function maybeRerank<T extends object>(
   }
 
   const documents = hits.map((hit) => documentForRerank(toDocument(hit)));
-  let result: Awaited<ReturnType<typeof client.rerank>>;
+  let result: Awaited<ReturnType<RerankClient['rerank']>>;
   try {
-    result = await client.rerank(query, documents, { model, topK: Math.min(limit, hits.length) });
+    result = await client.rerank(query, documents, { topK: Math.min(limit, hits.length) });
   } catch {
     return {
       hits: hits.slice(0, limit),

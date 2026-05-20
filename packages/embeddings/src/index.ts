@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { resetLocalRerankerForTests } from './local-reranker.ts';
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
 const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
@@ -252,7 +253,18 @@ export function resetEmbeddingsForTests(): void {
   rerankerSingleton = null;
   rerankerKey = null;
   rerankerDefaultModel = 'rerank-2.5';
+  resetLocalRerankerForTests();
 }
+
+export {
+  LocalRerankerClient,
+  LocalRerankerError,
+  getLocalReranker,
+  type LocalRerankerOptions,
+  type LocalRerankModel,
+  type LocalRerankResult,
+} from './local-reranker.ts';
+export { resetLocalRerankerForTests };
 
 export function getVoyageReranker(
   opts: { apiKey?: string; defaultModel?: VoyageRerankModel } = {},
