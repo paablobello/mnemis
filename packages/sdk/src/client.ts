@@ -6,6 +6,7 @@ import type {
   CreateSourceInput,
   GitHubInstallationDto,
   JobDto,
+  ListMemoriesQuery,
   ListSourcesQuery,
   MemoryDto,
   MemoryListResponse,
@@ -87,20 +88,32 @@ function safeJson(text: string): unknown {
   }
 }
 
+function memoryListQuery(query?: ListMemoriesQuery): RequestOptions['query'] {
+  if (!query) return undefined;
+  return {
+    kind: query.kind,
+    tag: query.tag,
+    directory: query.directory,
+    agent_origin: query.agentOrigin,
+    q: query.q,
+    include_archived: query.includeArchived,
+    include_expired: query.includeExpired,
+    include: query.include?.join(','),
+    limit: query.limit,
+    offset: query.offset,
+    created_after: query.createdAfter,
+    created_before: query.createdBefore,
+  };
+}
+
 export interface MnemisClient {
   raw: RawClient;
   memories: {
     create(input: CreateMemoryInput): Promise<MemoryDto>;
-    list(query?: {
-      kind?: string;
-      tag?: string;
-      directory?: string;
-      limit?: number;
-      offset?: number;
-    }): Promise<MemoryListResponse>;
+    list(query?: ListMemoriesQuery): Promise<MemoryListResponse>;
     get(id: string, options?: { include?: 'lineage' | 'embedding' }): Promise<MemoryDto>;
     patch(id: string, input: PatchMemoryInput): Promise<MemoryDto>;
-    remove(id: string): Promise<void>;
+    remove(id: string, options?: { permanent?: boolean }): Promise<void>;
     search(input: MemorySearchInput): Promise<MemoryListResponse>;
     semanticSearch(input: MemorySearchInput): Promise<MemoryListResponse>;
   };
@@ -135,7 +148,7 @@ export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
         return raw.request<MemoryListResponse>({
           method: 'GET',
           path: '/v1/memories',
-          query: query as Record<string, string | number | boolean | undefined | null>,
+          query: memoryListQuery(query),
         });
       },
       get(id, options) {
@@ -156,10 +169,11 @@ export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
           })
           .then((r) => r.data);
       },
-      async remove(id) {
+      async remove(id, options) {
         await raw.request<unknown>({
           method: 'DELETE',
           path: `/v1/memories/${encodeURIComponent(id)}`,
+          query: options?.permanent ? { permanent: true } : undefined,
         });
       },
       search(input) {

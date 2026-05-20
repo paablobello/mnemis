@@ -74,10 +74,21 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function localSourcesEnabled(): boolean {
+  return process.env.MNEMIS_ALLOW_LOCAL_SOURCES === 'true';
+}
+
 async function validateSourceConfig(workspaceId: string, input: CreateSourceInput): Promise<void> {
+  const config = asRecord(input.config);
+  if (typeof config.localPath === 'string' && !localSourcesEnabled()) {
+    throw ApiError.badRequest(
+      'local_sources_disabled',
+      'config.localPath is only allowed when MNEMIS_ALLOW_LOCAL_SOURCES=true',
+    );
+  }
+
   if (input.kind !== 'github_repo') return;
 
-  const config = asRecord(input.config);
   const installationId =
     typeof config.githubInstallationId === 'string' ? config.githubInstallationId : null;
   if (!installationId) return;

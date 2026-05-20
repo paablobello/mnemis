@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type Database, and, chunks, eq, jobs, sources, sql } from '@mnemis/db';
 import { type IndexSourceConfig, buildDocsSiteIndex, buildLocalSourceIndex } from '@mnemis/indexer';
 import { applyContextualPrefixes } from './contextual-prefix.ts';
+import { enqueueDueCronJobs } from './cron.ts';
 import { type EmbeddedIndexChunk, embedChunksForIndexing } from './embeddings.ts';
 import { loadEnv } from './env.ts';
 import { cloneGitHubRepo } from './git.ts';
@@ -171,6 +172,11 @@ async function buildSourceIndex(
   const config = asConfig(source.config);
 
   if (config.localPath) {
+    if (!loadEnv().MNEMIS_ALLOW_LOCAL_SOURCES) {
+      throw new Error(
+        'local_sources_disabled: config.localPath is only allowed when MNEMIS_ALLOW_LOCAL_SOURCES=true',
+      );
+    }
     return buildLocalSourceIndex(config.localPath, config);
   }
 
@@ -429,6 +435,7 @@ export async function runWorkerLoop(input: {
   const tokenStore = input.tokenStore ?? getDefaultTokenStore();
   while (true) {
     try {
+      await enqueueDueCronJobs(input.db);
       const processed = await processOneJob(input.db, tokenStore);
       if (input.once) return;
       if (!processed) {

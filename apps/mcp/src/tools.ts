@@ -1,10 +1,13 @@
 import type {
   ChunkSearchResponse,
+  GitHubInstallationDto,
+  JobDto,
   MemoryDto,
   MemoryListResponse,
   MnemisClient,
   SourceDto,
   SourceListResponse,
+  SourceStatusDto,
 } from '@mnemis/sdk';
 import { z } from 'zod';
 
@@ -68,6 +71,49 @@ function renderSourceList(response: SourceListResponse): string {
     ].join(' · ');
     lines.push(`_${meta}_`);
     if (s.status_message) lines.push(`> ${s.status_message}`);
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
+function renderSourceStatus(status: SourceStatusDto): string {
+  const source = status.source;
+  const lines: string[] = [];
+  lines.push(`## ${source.display_name} — \`${source.kind}\``);
+  lines.push(`_id: \`${source.id}\` · identifier: \`${source.identifier}\`_`);
+  lines.push('');
+  lines.push(
+    `status: ${source.status}${source.status_message ? ` — ${source.status_message}` : ''}`,
+  );
+  lines.push(`chunks: ${status.chunk_count}`);
+  lines.push(`last indexed: ${source.last_indexed_at ?? 'never'}`);
+  if (status.latest_job) {
+    lines.push('');
+    lines.push(renderJob(status.latest_job));
+  }
+  return lines.join('\n');
+}
+
+function renderJob(job: JobDto): string {
+  return `job: \`${job.id}\` · kind: ${job.kind} · status: ${job.status}`;
+}
+
+function renderGithubInstallations(items: GitHubInstallationDto[]): string {
+  if (items.length === 0) return '_No GitHub installations registered._';
+  const lines: string[] = [`# GitHub installations (${items.length})`, ''];
+  for (const installation of items) {
+    lines.push(`## ${installation.account_login}`);
+    const meta = [
+      `installation: \`${installation.installation_id}\``,
+      `id: \`${installation.id}\``,
+      installation.account_type ? `type: ${installation.account_type}` : null,
+      installation.repository_selection ? `repos: ${installation.repository_selection}` : null,
+      installation.events.length > 0 ? `events: ${installation.events.join(', ')}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    lines.push(`_${meta}_`);
+    if (installation.suspended_at) lines.push(`_suspended: ${installation.suspended_at}_`);
     lines.push('');
   }
   return lines.join('\n').trimEnd();
@@ -160,6 +206,12 @@ export const sourceIndexInput = {
     .enum(['manual', 'webhook', 'cron'])
     .optional()
     .describe('How reindex is triggered'),
+  cronSchedule: z
+    .string()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe('Required when indexStrategy is cron; standard 5-field cron expression'),
 };
 
 export async function sourceIndex(
@@ -171,6 +223,7 @@ export async function sourceIndex(
     branch?: string;
     githubInstallationId?: string;
     indexStrategy?: 'manual' | 'webhook' | 'cron';
+    cronSchedule?: string;
   },
 ): Promise<ToolResult> {
   const config: { branch?: string; githubInstallationId?: string } = {};
@@ -183,6 +236,7 @@ export async function sourceIndex(
     displayName: input.displayName,
     config: Object.keys(config).length > 0 ? config : undefined,
     indexStrategy: input.indexStrategy ?? 'manual',
+    cronSchedule: input.cronSchedule,
     enqueue: true,
   });
 
@@ -228,6 +282,33 @@ export async function sourceList(
 ): Promise<ToolResult> {
   const response = await ctx.client.sources.list(input);
   return text(renderSourceList(response));
+}
+
+export const sourceGetInput = {
+  id: z.string().uuid().describe('Source UUID'),
+};
+
+export async function sourceGet(ctx: ToolContext, input: { id: string }): Promise<ToolResult> {
+  const response = await ctx.client.sources.get(input.id);
+  return jsonText(response.data);
+}
+
+export const sourceStatusInput = {
+  id: z.string().uuid().describe('Source UUID'),
+};
+
+export async function sourceStatus(ctx: ToolContext, input: { id: string }): Promise<ToolResult> {
+  const status = await ctx.client.sources.status(input.id);
+  return text(renderSourceStatus(status));
+}
+
+export const sourceReindexInput = {
+  id: z.string().uuid().describe('Source UUID'),
+};
+
+export async function sourceReindex(ctx: ToolContext, input: { id: string }): Promise<ToolResult> {
+  const response = await ctx.client.sources.reindex(input.id);
+  return text(`Queued ${renderJob(response.job)}`);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -315,6 +396,53 @@ export async function memorySearch(
 }
 
 /* -------------------------------------------------------------------------- */
+/*  memory_list                                                                */
+/* -------------------------------------------------------------------------- */
+
+export const memoryListInput = {
+  kind: z
+    .enum(['working', 'session', 'fact', 'procedural'])
+    .optional()
+    .describe('Restrict to one kind'),
+  tag: z.string().min(1).max(64).optional().describe('Restrict to one tag'),
+  directory: z.string().min(1).optional().describe('Restrict to a directory'),
+  q: z.string().min(1).max(500).optional().describe('Substring search over memory metadata'),
+  includeArchived: z.boolean().optional().default(false),
+  includeExpired: z.boolean().optional().default(false),
+  includeLineage: z.boolean().optional().default(false),
+  limit: z.number().int().min(1).max(100).optional().describe('Page size (default 20)'),
+  offset: z.number().int().min(0).optional().describe('Page offset'),
+};
+
+export async function memoryList(
+  ctx: ToolContext,
+  input: {
+    kind?: 'working' | 'session' | 'fact' | 'procedural';
+    tag?: string;
+    directory?: string;
+    q?: string;
+    includeArchived?: boolean;
+    includeExpired?: boolean;
+    includeLineage?: boolean;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<ToolResult> {
+  const response = await ctx.client.memories.list({
+    kind: input.kind,
+    tag: input.tag,
+    directory: input.directory,
+    q: input.q,
+    includeArchived: input.includeArchived,
+    includeExpired: input.includeExpired,
+    include: input.includeLineage ? ['lineage'] : undefined,
+    limit: input.limit,
+    offset: input.offset,
+  });
+  return text(renderMemoryList(response, false));
+}
+
+/* -------------------------------------------------------------------------- */
 /*  memory_retrieve                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -336,4 +464,83 @@ export async function memoryRetrieve(
     input.includeLineage ? { include: 'lineage' } : undefined,
   );
   return text(renderMemoryList({ items: [m], total: 1, has_more: false }, true));
+}
+
+/* -------------------------------------------------------------------------- */
+/*  memory_update / memory_delete                                              */
+/* -------------------------------------------------------------------------- */
+
+export const memoryUpdateInput = {
+  id: z.string().uuid().describe('Memory UUID'),
+  kind: z.enum(['working', 'session', 'fact', 'procedural']).optional(),
+  tags: z.array(z.string().min(1).max(64)).max(64).optional(),
+  ttlSeconds: z.number().int().nonnegative().nullable().optional(),
+  archived: z.boolean().optional(),
+  metadata: z.record(z.unknown()).optional(),
+};
+
+export async function memoryUpdate(
+  ctx: ToolContext,
+  input: {
+    id: string;
+    kind?: 'working' | 'session' | 'fact' | 'procedural';
+    tags?: string[];
+    ttlSeconds?: number | null;
+    archived?: boolean;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<ToolResult> {
+  const { id, ...patch } = input;
+  const m = await ctx.client.memories.patch(id, patch);
+  return text(renderMemoryList({ items: [m], total: 1, has_more: false }, true));
+}
+
+export const memoryDeleteInput = {
+  id: z.string().uuid().describe('Memory UUID'),
+  permanent: z.boolean().optional().default(false).describe('Hard-delete instead of soft archive'),
+};
+
+export async function memoryDelete(
+  ctx: ToolContext,
+  input: { id: string; permanent?: boolean },
+): Promise<ToolResult> {
+  await ctx.client.memories.remove(input.id, { permanent: input.permanent });
+  return text(input.permanent ? `Permanently deleted \`${input.id}\`` : `Deleted \`${input.id}\``);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  github installations                                                       */
+/* -------------------------------------------------------------------------- */
+
+export const githubInstallationListInput = {};
+
+export async function githubInstallationList(ctx: ToolContext): Promise<ToolResult> {
+  const response = await ctx.client.github.listInstallations();
+  return text(renderGithubInstallations(response.items));
+}
+
+export const githubInstallationRegisterInput = {
+  installationId: z.string().regex(/^\d+$/).describe('Numeric GitHub App installation id'),
+  accountLogin: z.string().min(1).max(255),
+  accountType: z.string().min(1).max(100).optional(),
+  repositorySelection: z.string().min(1).max(100).optional(),
+  permissions: z.record(z.unknown()).optional(),
+  events: z.array(z.string().min(1).max(100)).max(100).optional(),
+  installedAt: z.string().datetime().optional(),
+};
+
+export async function githubInstallationRegister(
+  ctx: ToolContext,
+  input: {
+    installationId: string;
+    accountLogin: string;
+    accountType?: string;
+    repositorySelection?: string;
+    permissions?: Record<string, unknown>;
+    events?: string[];
+    installedAt?: string;
+  },
+): Promise<ToolResult> {
+  const response = await ctx.client.github.registerInstallation(input);
+  return text(renderGithubInstallations([response.data]));
 }

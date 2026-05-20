@@ -29,6 +29,7 @@ const SOURCES_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const SOURCES_ONLY_HASH = createHash('sha256').update(SOURCES_ONLY_KEY).digest('hex');
 const ORIGINAL_VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 const ORIGINAL_FETCH = globalThis.fetch;
+const ORIGINAL_ALLOW_LOCAL_SOURCES = process.env.MNEMIS_ALLOW_LOCAL_SOURCES;
 
 function unsetVoyageKey(): void {
   Reflect.deleteProperty(process.env, 'VOYAGE_API_KEY');
@@ -107,6 +108,11 @@ after(async () => {
   } else {
     process.env.VOYAGE_API_KEY = ORIGINAL_VOYAGE_API_KEY;
   }
+  if (ORIGINAL_ALLOW_LOCAL_SOURCES === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
+  } else {
+    process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+  }
   resetEmbeddingsForTests();
 
   await db.delete(workspaces).where(eq(workspaces.id, otherWorkspaceId));
@@ -168,6 +174,63 @@ describe('sources API', () => {
     assert.equal(res.status, 400);
     const json = await res.json();
     assert.equal(json.error, 'validation_error');
+  });
+
+  it('rejects localPath source config unless explicitly enabled', async () => {
+    Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
+    try {
+      const res = await app.request('/v1/sources', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          kind: 'github_repo',
+          identifier: 'openai/local-path-blocked',
+          config: { localPath: '/etc' },
+          enqueue: false,
+        }),
+      });
+      assert.equal(res.status, 400);
+      const json = await res.json();
+      assert.equal(json.error, 'local_sources_disabled');
+    } finally {
+      if (ORIGINAL_ALLOW_LOCAL_SOURCES === undefined) {
+        Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
+      } else {
+        process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+      }
+    }
+  });
+
+  it('requires cronSchedule when indexStrategy is cron', async () => {
+    const missing = await app.request('/v1/sources', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        kind: 'github_repo',
+        identifier: 'openai/cron-missing',
+        indexStrategy: 'cron',
+      }),
+    });
+    assert.equal(missing.status, 400);
+    const missingJson = await missing.json();
+    assert.equal(missingJson.error, 'validation_error');
+
+    const scheduled = await app.request('/v1/sources', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        kind: 'github_repo',
+        identifier: 'openai/cron-scheduled',
+        indexStrategy: 'cron',
+        cronSchedule: '*/15 * * * *',
+        enqueue: false,
+      }),
+    });
+    assert.equal(scheduled.status, 201);
+    const scheduledJson = await scheduled.json();
+    assert.equal(scheduledJson.data.index_strategy, 'cron');
+    assert.equal(scheduledJson.data.cron_schedule, '*/15 * * * *');
+    assert.equal(scheduledJson.job, null);
   });
 
   it('lists and retrieves sources in the authenticated workspace', async () => {

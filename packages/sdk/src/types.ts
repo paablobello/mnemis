@@ -79,6 +79,21 @@ export interface MemorySearchInput {
   include?: Array<'lineage' | 'embedding'>;
 }
 
+export interface ListMemoriesQuery {
+  kind?: MemoryKind;
+  tag?: string;
+  directory?: string;
+  agentOrigin?: string;
+  q?: string;
+  includeArchived?: boolean;
+  includeExpired?: boolean;
+  include?: Array<'lineage' | 'embedding'>;
+  limit?: number;
+  offset?: number;
+  createdAfter?: string;
+  createdBefore?: string;
+}
+
 export interface SourceDto {
   id: string;
   kind: SourceKind;

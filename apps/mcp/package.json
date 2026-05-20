@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "mnemis-mcp": "src/index.ts"
+    "mnemis-mcp": "bin/mnemis-mcp.js"
   },
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/index.ts",

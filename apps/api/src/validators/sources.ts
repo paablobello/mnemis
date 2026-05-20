@@ -75,6 +75,22 @@ export const createSourceSchema = z
         message: 'cronSchedule is only valid when indexStrategy is cron',
       });
     }
+
+    if (value.indexStrategy === 'cron') {
+      if (!value.cronSchedule) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['cronSchedule'],
+          message: 'cronSchedule is required when indexStrategy is cron',
+        });
+      } else if (value.cronSchedule.trim().split(/\s+/).length !== 5) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['cronSchedule'],
+          message: 'cronSchedule must be a standard 5-field cron expression',
+        });
+      }
+    }
   });
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;
 

@@ -3,14 +3,14 @@
   "globalEnv": [
     "NODE_ENV",
     "DATABASE_URL",
-    "REDIS_URL",
     "API_PORT",
     "API_HOST",
     "ANTHROPIC_API_KEY",
     "VOYAGE_API_KEY",
     "COHERE_API_KEY",
     "INTERNAL_AUTH_SECRET",
-    "LOG_LEVEL"
+    "LOG_LEVEL",
+    "MNEMIS_ALLOW_LOCAL_SOURCES"
   ],
   "tasks": {
     "build": {

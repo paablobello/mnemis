@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
 import { chunks, createDatabase, eq, jobs, sources, sql, users, workspaces } from '@mnemis/db';
 import { resetEmbeddingsForTests } from '@mnemis/embeddings';
+import { cronHasDueMinute, enqueueDueCronJobs } from '../src/cron.ts';
 import { processOneJob } from '../src/runner.ts';
 
 const url = process.env.DATABASE_URL;
@@ -18,6 +19,7 @@ const TEST_EMAIL = `${TEST_SLUG}@mnemis.test`;
 const ORIGINAL_VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 const ORIGINAL_ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ORIGINAL_ANTHROPIC_CONTEXT_MODEL = process.env.ANTHROPIC_CONTEXT_MODEL;
+const ORIGINAL_ALLOW_LOCAL_SOURCES = process.env.MNEMIS_ALLOW_LOCAL_SOURCES;
 const ORIGINAL_FETCH = globalThis.fetch;
 const CLAIM_FIRST = new Date('2000-01-01T00:00:00.000Z');
 
@@ -56,6 +58,8 @@ function htmlResponse(body: string): Response {
 }
 
 before(async () => {
+  process.env.MNEMIS_ALLOW_LOCAL_SOURCES = 'true';
+
   const [user] = await db
     .insert(users)
     .values({ email: TEST_EMAIL, name: TEST_SLUG })
@@ -112,6 +116,11 @@ after(async () => {
   } else {
     process.env.ANTHROPIC_CONTEXT_MODEL = ORIGINAL_ANTHROPIC_CONTEXT_MODEL;
   }
+  if (ORIGINAL_ALLOW_LOCAL_SOURCES === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
+  } else {
+    process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+  }
   resetEmbeddingsForTests();
 
   await rm(repoRoot, { recursive: true, force: true });
@@ -120,6 +129,100 @@ after(async () => {
 });
 
 describe('index worker', () => {
+  it('detects due cron minutes with standard 5-field expressions', () => {
+    assert.equal(
+      cronHasDueMinute(
+        '*/15 * * * *',
+        new Date('2026-05-20T10:00:00.000Z'),
+        new Date('2026-05-20T10:15:30.000Z'),
+      ),
+      true,
+    );
+    assert.equal(
+      cronHasDueMinute(
+        '0 3 * * *',
+        new Date('2026-05-20T03:00:00.000Z'),
+        new Date('2026-05-20T03:59:59.000Z'),
+      ),
+      false,
+    );
+  });
+
+  it('queues due cron reindex jobs without duplicating open jobs', async () => {
+    const anchor = new Date('2026-05-20T10:00:00.000Z');
+    const now = new Date('2026-05-20T10:15:30.000Z');
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'github_repo',
+        identifier: 'mnemis/cron-fixture',
+        displayName: 'cron fixture',
+        config: {},
+        indexStrategy: 'cron',
+        cronSchedule: '*/15 * * * *',
+        status: 'indexed',
+        createdAt: anchor,
+        lastIndexedAt: anchor,
+      })
+      .returning();
+
+    assert.equal(await enqueueDueCronJobs(db, now), 1);
+    assert.equal(await enqueueDueCronJobs(db, now), 0);
+
+    const rows = await db
+      .select()
+      .from(jobs)
+      .where(sql`${jobs.payload}->>'source_id' = ${source!.id}`);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.kind, 'reindex_source');
+    assert.equal(rows[0]!.status, 'queued');
+  });
+
+  it('fails localPath jobs unless local sources are explicitly enabled', async () => {
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'github_repo',
+        identifier: 'mnemis/local-disabled-fixture',
+        displayName: 'local disabled fixture',
+        config: { localPath: repoRoot, includePaths: ['README.md'] },
+        status: 'pending',
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'index_source',
+        payload: { source_id: source!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
+    try {
+      const processed = await processOneJob(db);
+      assert.equal(processed, true);
+    } finally {
+      process.env.MNEMIS_ALLOW_LOCAL_SOURCES = 'true';
+    }
+
+    const [updatedSource] = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.id, source!.id))
+      .limit(1);
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+
+    assert.equal(updatedSource!.status, 'failed');
+    assert.match(updatedSource!.statusMessage ?? '', /local_sources_disabled/);
+    assert.equal(updatedJob!.status, 'failed');
+    assert.match(updatedJob!.error ?? '', /local_sources_disabled/);
+  });
+
   it('claims a queued source job, indexes local files and completes state', async () => {
     const [source] = await db
       .insert(sources)

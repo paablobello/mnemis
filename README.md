@@ -4,35 +4,48 @@
 
 Mnemis gives AI coding agents (Cursor, Claude Code, Codex, etc.) **persistent memory** and **fresh, cited retrieval over your repos and docs** — through a single MCP server, REST API, and CLI.
 
-**Status**: pre-alpha, in active development. Not yet usable. See `docs/research/tech-decisions.md` for the technical roadmap.
+**Status**: pre-alpha, usable for local development and integration testing. The API, worker, MCP server, TypeScript SDK, and CLI are present; hosted cloud UX and several retrieval-quality roadmap items are still in progress.
 
 ## What it is
 
 Mnemis combines:
 
 1. **Memory** — agents save plans, decisions, and conversation state with typed TTLs (working / session / fact / procedural). Other agents pick up where they left off.
-2. **Indexing** — repos (webhook-driven reindex) and docs sites (Firecrawl crawler). AST-aware code chunking with tree-sitter + parent-child strategy.
-3. **Retrieval** — hybrid vector + BM25 with RRF fusion, reranked by mxbai-rerank-large-v2. Anthropic Contextual Retrieval prefix on every chunk.
+2. **Indexing** — GitHub repos and docs sites through the worker, with include/exclude filters, docs crawling, and optional contextual prefixes.
+3. **Retrieval** — keyword or hybrid vector + BM25 retrieval with RRF-style fusion and cited raw, markdown, or synthesized responses.
 4. **MCP first** — works with Cursor, Claude Code, Codex, Windsurf, Zed out of the box.
 
-## Quick start (coming soon)
+## Quick start
 
 ```bash
-# Self-host with Docker
 git clone https://github.com/<org>/mnemis
 cd mnemis
-docker compose -f docker/docker-compose.yml up -d
+bun install
+cp .env.example .env
+bun run docker:up
+bun run db:migrate
+bun run db:bootstrap -- --email you@example.com --workspace local
 
-# Or use Mnemis Cloud
-npx mnemis@latest  # wizard configures your agent in <1 min
+# In separate terminals:
+bun run api:dev
+bun run worker:dev
 ```
 
-For the current development CLI and SDK usage, see
-[`docs/cli-sdk.md`](./docs/cli-sdk.md).
+Then create or bootstrap an API key, configure the CLI, and register sources:
+
+```bash
+bun run cli auth login --url http://localhost:8787 --key mn_...
+bun run cli repos add owner/repo --branch main --strategy webhook
+bun run cli docs add https://docs.example.com --max-pages 100
+bun run cli docs add https://docs.example.com --strategy cron --cron "0 3 * * *"
+bun run cli status
+```
+
+For full CLI and SDK usage, see [`docs/cli-sdk.md`](./docs/cli-sdk.md).
 
 ## Architecture
 
-Single Postgres for everything (pgvector + tsvector + relational + jobs via pg-boss). TypeScript everywhere (Bun + Node 22). MCP server, REST API, and CLI all backed by the same core packages.
+Single Postgres for everything (pgvector + tsvector + relational data + jobs table). TypeScript everywhere (Bun + Node 22). MCP server, REST API, CLI, and integrations share the same TypeScript SDK.
 
 See `docs/research/tech-decisions.md` for full architectural rationale.
 

@@ -1,11 +1,19 @@
 import { parseArgs } from 'node:util';
-import type { IndexStrategy, MemoryKind, SourceKind, SourceStatus } from '@mnemis/sdk';
+import type {
+  IndexStrategy,
+  MemoryKind,
+  PatchMemoryInput,
+  SourceKind,
+  SourceStatus,
+} from '@mnemis/sdk';
 import { clearCredentials, maskKey, readCredentials, writeCredentials } from './credentials.ts';
 import { err, out, prompt, readStdin } from './io.ts';
 import {
+  renderGithubInstallations,
   renderMemory,
   renderMemoryList,
   renderSearch,
+  renderSource,
   renderSourceStatus,
   renderSources,
 } from './render.ts';
@@ -24,12 +32,14 @@ Usage:
 
   mnemis repos add <owner/repo> [--branch <name>] [--installation <id>]
                                 [--strategy manual|webhook|cron] [--display-name <s>]
+                                [--cron "*/15 * * * *"]
                                 [--include <path>] [--exclude <path>]
                                 [--max-file-bytes N] [--chunk-max-chars N]
                                 [--contextual-prefix auto|always|never]
 
   mnemis docs add <url> [--display-name <s>] [--include <path>] [--exclude <path>]
                          [--focus <s>] [--max-pages N] [--no-robots]
+                         [--strategy manual|cron] [--cron "0 3 * * *"]
                          [--contextual-prefix auto|always|never]
 
   mnemis search <query> [--mode markdown|raw|synthesized] [--limit N]
@@ -38,12 +48,26 @@ Usage:
 
   mnemis memory save --kind <fact|procedural|session|working> --title <s> --summary <s>
                      [--body <s> | stdin] [--tag <t>] [--directory <s>] [--ttl N]
+  mnemis memory list [--kind <k>] [--tag <t>] [--directory <s>] [--q <s>]
+                     [--include-archived] [--include-expired] [--limit N] [--offset N]
   mnemis memory search <query> [--limit N] [--kind <k>] [--keyword]
   mnemis memory get <id> [--lineage]
+  mnemis memory update <id> [--kind <k>] [--tag <t>] [--ttl N|--no-ttl]
+                           [--archive|--unarchive] [--metadata-json <json>]
+  mnemis memory archive <id>
+  mnemis memory restore <id>
+  mnemis memory delete <id> [--permanent]
 
   mnemis sources list [--kind <k>] [--status <s>] [--limit N]
+  mnemis sources get <id>
   mnemis sources status <id>
+  mnemis sources reindex <id>
   mnemis status   (alias of sources list)
+
+  mnemis github installations list
+  mnemis github installations register --installation <id> --account <login>
+                                      [--account-type <s>] [--repository-selection all|selected]
+                                      [--event <name>] [--permissions-json <json>]
 
 Environment overrides:
   MNEMIS_API_URL, MNEMIS_API_KEY  Skip the credentials file when set.
@@ -104,6 +128,15 @@ function nonNegativeInt(value: string | undefined, label: string): number | unde
   return parsed;
 }
 
+function jsonObject(value: string | undefined, label: string): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 function prepend(value: string | undefined, rest: string[]): string[] {
   return value === undefined ? rest : [value, ...rest];
 }
@@ -161,6 +194,7 @@ export async function cmdReposAdd(argv: string[], services: CliServices): Promis
       branch: { type: 'string' },
       installation: { type: 'string' },
       strategy: { type: 'string' },
+      cron: { type: 'string' },
       'display-name': { type: 'string' },
       include: { type: 'string', multiple: true },
       exclude: { type: 'string', multiple: true },
@@ -175,6 +209,8 @@ export async function cmdReposAdd(argv: string[], services: CliServices): Promis
   if (!identifier) return fail('Expected <owner/repo>');
 
   const strategy = optionalEnum(values.strategy, INDEX_STRATEGIES, '--strategy') ?? 'webhook';
+  if (strategy === 'cron' && !values.cron) return fail('--cron is required when --strategy cron');
+  if (strategy !== 'cron' && values.cron) return fail('--cron is only valid with --strategy cron');
   const contextualPrefixMode = optionalEnum(
     values['contextual-prefix'],
     CONTEXTUAL_PREFIX_MODES,
@@ -198,6 +234,7 @@ export async function cmdReposAdd(argv: string[], services: CliServices): Promis
       contextualPrefixMode,
     },
     indexStrategy: strategy,
+    cronSchedule: values.cron,
     enqueue: true,
   });
 
@@ -216,6 +253,8 @@ export async function cmdDocsAdd(argv: string[], services: CliServices): Promise
       focus: { type: 'string' },
       'max-pages': { type: 'string' },
       'no-robots': { type: 'boolean' },
+      strategy: { type: 'string' },
+      cron: { type: 'string' },
       'contextual-prefix': { type: 'string' },
     },
     allowPositionals: true,
@@ -230,6 +269,10 @@ export async function cmdDocsAdd(argv: string[], services: CliServices): Promise
     '--contextual-prefix',
   );
   const maxPages = positiveInt(values['max-pages'], '--max-pages');
+  const strategy =
+    optionalEnum(values.strategy, ['manual', 'cron'] as const, '--strategy') ?? 'manual';
+  if (strategy === 'cron' && !values.cron) return fail('--cron is required when --strategy cron');
+  if (strategy !== 'cron' && values.cron) return fail('--cron is only valid with --strategy cron');
 
   const client = await services.client();
   const result = await client.sources.create({
@@ -244,7 +287,8 @@ export async function cmdDocsAdd(argv: string[], services: CliServices): Promise
       respectRobots: values['no-robots'] ? false : undefined,
       contextualPrefixMode,
     },
-    indexStrategy: 'manual',
+    indexStrategy: strategy,
+    cronSchedule: values.cron,
     enqueue: true,
   });
 
@@ -377,6 +421,43 @@ export async function cmdMemorySearch(
   return { exitCode: 0 };
 }
 
+export async function cmdMemoryList(argv: string[], services: CliServices): Promise<CommandResult> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      kind: { type: 'string' },
+      tag: { type: 'string' },
+      directory: { type: 'string' },
+      q: { type: 'string' },
+      'include-archived': { type: 'boolean' },
+      'include-expired': { type: 'boolean' },
+      lineage: { type: 'boolean' },
+      limit: { type: 'string' },
+      offset: { type: 'string' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+
+  const kind = optionalEnum(values.kind, MEMORY_KINDS, '--kind') as MemoryKind | undefined;
+  const limit = positiveInt(values.limit, '--limit');
+  const offset = nonNegativeInt(values.offset, '--offset');
+  const client = await services.client();
+  const response = await client.memories.list({
+    kind,
+    tag: values.tag,
+    directory: values.directory,
+    q: values.q,
+    includeArchived: values['include-archived'],
+    includeExpired: values['include-expired'],
+    include: values.lineage ? ['lineage'] : undefined,
+    limit,
+    offset,
+  });
+  out(renderMemoryList(response, false));
+  return { exitCode: 0 };
+}
+
 export async function cmdMemoryGet(argv: string[], services: CliServices): Promise<CommandResult> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -390,6 +471,105 @@ export async function cmdMemoryGet(argv: string[], services: CliServices): Promi
   const client = await services.client();
   const memory = await client.memories.get(id, values.lineage ? { include: 'lineage' } : undefined);
   out(renderMemory(memory));
+  return { exitCode: 0 };
+}
+
+export async function cmdMemoryUpdate(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      kind: { type: 'string' },
+      tag: { type: 'string', multiple: true },
+      ttl: { type: 'string' },
+      'no-ttl': { type: 'boolean' },
+      archive: { type: 'boolean' },
+      unarchive: { type: 'boolean' },
+      'metadata-json': { type: 'string' },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <memory_id>');
+  if (values.ttl !== undefined && values['no-ttl']) {
+    return fail('Use either --ttl or --no-ttl, not both');
+  }
+  if (values.archive && values.unarchive) {
+    return fail('Use either --archive or --unarchive, not both');
+  }
+
+  const input: PatchMemoryInput = {};
+  const kind = optionalEnum(values.kind, MEMORY_KINDS, '--kind') as MemoryKind | undefined;
+  if (kind) input.kind = kind;
+  if (values.tag) input.tags = values.tag as string[];
+  if (values.ttl !== undefined) input.ttlSeconds = nonNegativeInt(values.ttl, '--ttl');
+  if (values['no-ttl']) input.ttlSeconds = null;
+  if (values.archive) input.archived = true;
+  if (values.unarchive) input.archived = false;
+  const metadata = jsonObject(values['metadata-json'], '--metadata-json');
+  if (metadata) input.metadata = metadata;
+  if (Object.keys(input).length === 0) return fail('At least one update option is required');
+
+  const client = await services.client();
+  const memory = await client.memories.patch(id, input);
+  out(renderMemory(memory));
+  return { exitCode: 0 };
+}
+
+export async function cmdMemoryArchive(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    allowPositionals: true,
+    strict: true,
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <memory_id>');
+  const client = await services.client();
+  const memory = await client.memories.patch(id, { archived: true });
+  out(`Archived memory ${memory.id}`);
+  return { exitCode: 0 };
+}
+
+export async function cmdMemoryRestore(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    allowPositionals: true,
+    strict: true,
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <memory_id>');
+  const client = await services.client();
+  const memory = await client.memories.patch(id, { archived: false });
+  out(`Restored memory ${memory.id}`);
+  return { exitCode: 0 };
+}
+
+export async function cmdMemoryDelete(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: { permanent: { type: 'boolean' } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <memory_id>');
+  const client = await services.client();
+  await client.memories.remove(id, { permanent: values.permanent });
+  out(values.permanent ? `Permanently deleted memory ${id}` : `Deleted memory ${id}`);
   return { exitCode: 0 };
 }
 
@@ -446,6 +626,90 @@ export async function cmdSourcesStatus(
   return { exitCode: 0 };
 }
 
+export async function cmdSourcesGet(argv: string[], services: CliServices): Promise<CommandResult> {
+  const { positionals } = parseArgs({
+    args: argv,
+    strict: true,
+    allowPositionals: true,
+    options: {},
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <source_id>');
+
+  const client = await services.client();
+  const response = await client.sources.get(id);
+  out(renderSource(response.data));
+  return { exitCode: 0 };
+}
+
+export async function cmdSourcesReindex(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { positionals } = parseArgs({
+    args: argv,
+    strict: true,
+    allowPositionals: true,
+    options: {},
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <source_id>');
+
+  const client = await services.client();
+  const response = await client.sources.reindex(id);
+  out(`Queued reindex job ${response.job.id} (${response.job.status})`);
+  return { exitCode: 0 };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  github                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export async function cmdGithubInstallationsList(
+  _argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const client = await services.client();
+  const response = await client.github.listInstallations();
+  out(renderGithubInstallations(response.items));
+  return { exitCode: 0 };
+}
+
+export async function cmdGithubInstallationsRegister(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      installation: { type: 'string' },
+      account: { type: 'string' },
+      'account-type': { type: 'string' },
+      'repository-selection': { type: 'string' },
+      event: { type: 'string', multiple: true },
+      'permissions-json': { type: 'string' },
+      'installed-at': { type: 'string' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  if (!values.installation) return fail('--installation is required');
+  if (!values.account) return fail('--account is required');
+
+  const client = await services.client();
+  const response = await client.github.registerInstallation({
+    installationId: values.installation,
+    accountLogin: values.account,
+    accountType: values['account-type'],
+    repositorySelection: values['repository-selection'],
+    permissions: jsonObject(values['permissions-json'], '--permissions-json'),
+    events: values.event as string[] | undefined,
+    installedAt: values['installed-at'],
+  });
+  out(renderGithubInstallations([response.data]));
+  return { exitCode: 0 };
+}
+
 /* -------------------------------------------------------------------------- */
 /*  dispatch                                                                   */
 /* -------------------------------------------------------------------------- */
@@ -469,14 +733,33 @@ export async function dispatch(argv: string[], services: CliServices): Promise<C
     if (first === 'search') return await cmdSearch(prepend(second, rest), services);
     if (first === 'memory') {
       if (second === 'save') return await cmdMemorySave(rest, services);
+      if (second === 'list' || !second) return await cmdMemoryList(rest, services);
       if (second === 'search') return await cmdMemorySearch(rest, services);
       if (second === 'get') return await cmdMemoryGet(rest, services);
+      if (second === 'update') return await cmdMemoryUpdate(rest, services);
+      if (second === 'archive') return await cmdMemoryArchive(rest, services);
+      if (second === 'restore') return await cmdMemoryRestore(rest, services);
+      if (second === 'delete') return await cmdMemoryDelete(rest, services);
       return fail(`Unknown memory subcommand: ${second ?? '(none)'}`);
     }
     if (first === 'sources') {
       if (second === 'list' || !second) return await cmdSourcesList(rest, services);
+      if (second === 'get') return await cmdSourcesGet(rest, services);
       if (second === 'status') return await cmdSourcesStatus(rest, services);
+      if (second === 'reindex') return await cmdSourcesReindex(rest, services);
       return fail(`Unknown sources subcommand: ${second}`);
+    }
+    if (first === 'github') {
+      if (second === 'installations') {
+        const [third, ...githubRest] = rest;
+        if (third === 'list' || !third)
+          return await cmdGithubInstallationsList(githubRest, services);
+        if (third === 'register') {
+          return await cmdGithubInstallationsRegister(githubRest, services);
+        }
+        return fail(`Unknown github installations subcommand: ${third}`);
+      }
+      return fail(`Unknown github subcommand: ${second ?? '(none)'}`);
     }
     if (first === 'status') return await cmdSourcesList(prepend(second, rest), services);
     return fail(`Unknown command: ${first}. Run 'mnemis help' for usage.`);

@@ -12,6 +12,7 @@ export type {
   GitHubInstallationDto,
   IndexStrategy,
   JobDto,
+  ListMemoriesQuery,
   ListSourcesQuery,
   MemoryDto,
   MemoryKind,

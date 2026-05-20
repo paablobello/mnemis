@@ -5,18 +5,34 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { loadConfig } from './config.ts';
 import {
   type ToolContext,
+  githubInstallationList,
+  githubInstallationListInput,
+  githubInstallationRegister,
+  githubInstallationRegisterInput,
+  memoryDelete,
+  memoryDeleteInput,
+  memoryList,
+  memoryListInput,
   memoryRetrieve,
   memoryRetrieveInput,
   memorySave,
   memorySaveInput,
   memorySearch,
   memorySearchInput,
+  memoryUpdate,
+  memoryUpdateInput,
+  sourceGet,
+  sourceGetInput,
   sourceIndex,
   sourceIndexInput,
   sourceList,
   sourceListInput,
+  sourceReindex,
+  sourceReindexInput,
   sourceSearch,
   sourceSearchInput,
+  sourceStatus,
+  sourceStatusInput,
 } from './tools.ts';
 
 const config = loadConfig();
@@ -61,6 +77,36 @@ server.registerTool(
 );
 
 server.registerTool(
+  'source_get',
+  {
+    description: 'Fetch one source by id, including stored source config.',
+    inputSchema: sourceGetInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => sourceGet(ctx, input),
+);
+
+server.registerTool(
+  'source_status',
+  {
+    description: 'Fetch source status, latest indexing job, and indexed chunk count.',
+    inputSchema: sourceStatusInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => sourceStatus(ctx, input),
+);
+
+server.registerTool(
+  'source_reindex',
+  {
+    description: 'Queue a reindex job for an existing source.',
+    inputSchema: sourceReindexInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => sourceReindex(ctx, input),
+);
+
+server.registerTool(
   'memory_save',
   {
     description:
@@ -83,6 +129,16 @@ server.registerTool(
 );
 
 server.registerTool(
+  'memory_list',
+  {
+    description: 'List memories with filters for kind, tag, directory, archived/expired state.',
+    inputSchema: memoryListInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => memoryList(ctx, input),
+);
+
+server.registerTool(
   'memory_retrieve',
   {
     description: 'Fetch the full body of a single memory by id.',
@@ -90,6 +146,46 @@ server.registerTool(
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
   (input: any) => memoryRetrieve(ctx, input),
+);
+
+server.registerTool(
+  'memory_update',
+  {
+    description:
+      'Patch memory metadata fields only: kind, tags, ttlSeconds, archived, metadata. Body/title/summary are immutable; save a new memory with derivedFrom for content changes.',
+    inputSchema: memoryUpdateInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => memoryUpdate(ctx, input),
+);
+
+server.registerTool(
+  'memory_delete',
+  {
+    description: 'Delete a memory. Defaults to soft archive; permanent=true hard-deletes.',
+    inputSchema: memoryDeleteInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => memoryDelete(ctx, input),
+);
+
+server.registerTool(
+  'github_installation_list',
+  {
+    description: 'List GitHub App installations linked to this workspace.',
+    inputSchema: githubInstallationListInput,
+  },
+  () => githubInstallationList(ctx),
+);
+
+server.registerTool(
+  'github_installation_register',
+  {
+    description: 'Register or update a GitHub App installation for private repository indexing.',
+    inputSchema: githubInstallationRegisterInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => githubInstallationRegister(ctx, input),
 );
 
 const transport = new StdioServerTransport();

@@ -8,7 +8,7 @@ You need:
 
 - **Node** >= 22
 - **Bun** >= 1.3 (used as package manager, runtime, and bundler)
-- **Docker** (for Postgres + Redis locally)
+- **Docker** (for Postgres locally)
 
 ```bash
 git clone https://github.com/<org>/mnemis
@@ -16,14 +16,18 @@ cd mnemis
 bun install
 cp .env.example .env
 
-# Start Postgres + Redis
+# Start Postgres
 bun run docker:up
 
 # Run migrations
 bun run db:migrate
 
-# Start the API in dev mode
+# Create a local workspace and API key
+bun run db:bootstrap -- --email you@example.com --workspace local
+
+# Start the API and worker in separate terminals
 bun run api:dev
+bun run worker:dev
 ```
 
 The API should be reachable at `http://localhost:8787/health`.
@@ -48,7 +52,13 @@ export MNEMIS_API_KEY=mn_test_...
 bun --filter @mnemis/mcp dev
 ```
 
-Tools registered: `source_search`, `source_index`, `source_list`, `memory_save`, `memory_search`, `memory_retrieve`.
+Tools registered today:
+
+- Sources: `source_search`, `source_index`, `source_list`, `source_get`, `source_status`, `source_reindex`
+- Memories: `memory_save`, `memory_search`, `memory_list`, `memory_retrieve`, `memory_update`, `memory_delete`
+- GitHub App: `github_installation_list`, `github_installation_register`
+
+Run the MCP server after setting `MNEMIS_API_URL` and `MNEMIS_API_KEY`.
 
 To wire it into Claude Code, add to `~/.config/claude-code/mcp.json` (or the equivalent for your client):
 
@@ -56,8 +66,7 @@ To wire it into Claude Code, add to `~/.config/claude-code/mcp.json` (or the equ
 {
   "mcpServers": {
     "mnemis": {
-      "command": "node",
-      "args": ["--experimental-strip-types", "/path/to/mnemis/apps/mcp/src/index.ts"],
+      "command": "/path/to/mnemis/apps/mcp/bin/mnemis-mcp.js",
       "env": {
         "MNEMIS_API_URL": "http://localhost:8787",
         "MNEMIS_API_KEY": "mn_test_..."
@@ -71,18 +80,16 @@ To wire it into Claude Code, add to `~/.config/claude-code/mcp.json` (or the equ
 
 ```
 apps/
-  api/        — REST API + MCP transport (Hono on Node 22)
-  cli/        — Mnemis CLI (Bun)
-  mcp/        — Standalone MCP server (Bun)
+  api/        — REST API (Hono on Node 22)
+  cli/        — Mnemis CLI
+  mcp/        — Standalone MCP server over stdio
+  worker/     — Index job worker
 packages/
   db/         — Drizzle schema + migrations
-  core/       — Shared business logic
   sdk/        — TypeScript SDK
   indexer/    — Repo and docs indexers
-  chunker/    — tree-sitter AST chunking + contextual prefix
-  search/     — Hybrid search + RRF + reranker
-services/
-  reranker/   — Optional Python ONNX reranker service
+  eval/       — Retrieval-quality evaluation helpers
+  embeddings/ — Embedding provider abstraction
 docker/       — Docker compose + Dockerfiles
 docs/         — Architecture, API reference, research
 ```
@@ -103,7 +110,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 ```bash
 bun run typecheck
 bun run lint
-bun run test
+bun run test:local
 ```
 
 CI runs all of these on every PR — make sure they pass locally first.

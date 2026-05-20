@@ -1,5 +1,6 @@
 import type {
   ChunkSearchResponse,
+  GitHubInstallationDto,
   MemoryDto,
   MemoryListResponse,
   SourceDto,
@@ -76,6 +77,26 @@ export function renderMemory(memory: MemoryDto, includeBody = true): string {
 
 export function renderSource(source: SourceDto): string {
   return renderSources({ items: [source], total: 1, has_more: false });
+}
+
+export function renderGithubInstallations(items: GitHubInstallationDto[]): string {
+  if (items.length === 0) return 'No GitHub installations registered.';
+  const lines: string[] = [];
+  lines.push(`GitHub installations (${items.length}):`);
+  for (const installation of items) {
+    lines.push('');
+    lines.push(`• ${installation.account_login}`);
+    lines.push(`    installation: ${installation.installation_id}`);
+    lines.push(`    id:           ${installation.id}`);
+    if (installation.account_type) lines.push(`    type:         ${installation.account_type}`);
+    if (installation.repository_selection) {
+      lines.push(`    repos:        ${installation.repository_selection}`);
+    }
+    if (installation.events.length > 0)
+      lines.push(`    events:       ${installation.events.join(', ')}`);
+    if (installation.suspended_at) lines.push(`    suspended:    ${installation.suspended_at}`);
+  }
+  return lines.join('\n');
 }
 
 function indent(text: string, spaces: number): string {

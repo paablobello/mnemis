@@ -8,15 +8,15 @@ workspace package. Both expect a running API and a bearer API key.
 During development, run the CLI through the workspace script:
 
 ```bash
-bun --filter @mnemis/cli start help
+bun run cli help
 ```
 
 Authenticate once and store credentials locally:
 
 ```bash
-bun --filter @mnemis/cli start auth login \
+bun run cli auth login \
   --url http://localhost:8787 \
-  --key mn_test_...
+  --key mn_...
 ```
 
 You can also skip the credentials file with environment variables:
@@ -29,30 +29,53 @@ export MNEMIS_API_KEY=mn_test_...
 Register sources:
 
 ```bash
-bun --filter @mnemis/cli start repos add owner/repo \
+bun run cli repos add owner/repo \
   --branch main \
   --installation 12345 \
   --strategy webhook
 
-bun --filter @mnemis/cli start docs add https://docs.example.com \
+bun run cli docs add https://docs.example.com \
   --include /api \
   --exclude /blog \
   --max-pages 100
+
+bun run cli docs add https://docs.example.com \
+  --strategy cron \
+  --cron "0 3 * * *"
 ```
 
 Search indexed content and manage memories:
 
 ```bash
-bun --filter @mnemis/cli start search "how is indexing scheduled?" --mode markdown
+bun run cli search "how is indexing scheduled?" --mode markdown
 
-bun --filter @mnemis/cli start memory save \
+bun run cli memory save \
   --kind fact \
   --title "Indexer queue" \
   --summary "Sources enqueue an index_source job" \
   --body "Repos and docs use /v1/sources with enqueue=true."
 
-bun --filter @mnemis/cli start memory search "indexer queue"
-bun --filter @mnemis/cli start status
+bun run cli memory list --kind fact --tag architecture
+bun run cli memory search "indexer queue"
+bun run cli memory update <memory-id> --tag architecture --no-ttl
+bun run cli memory delete <memory-id>
+bun run cli status
+```
+
+Operational commands:
+
+```bash
+bun run cli sources get <source-id>
+bun run cli sources status <source-id>
+bun run cli sources reindex <source-id>
+
+bun run cli github installations list
+bun run cli github installations register \
+  --installation 12345 \
+  --account owner \
+  --account-type Organization \
+  --repository-selection selected \
+  --event push
 ```
 
 Credentials are stored at `$MNEMIS_CREDENTIALS_FILE` when set, otherwise at
@@ -79,6 +102,14 @@ const source = await client.sources.create({
   enqueue: true,
 });
 
+await client.sources.create({
+  kind: 'docs_site',
+  identifier: 'https://docs.example.com',
+  indexStrategy: 'cron',
+  cronSchedule: '0 3 * * *',
+  enqueue: true,
+});
+
 const results = await client.search({
   query: 'contextual retrieval',
   mode: 'markdown',
@@ -94,8 +125,20 @@ const memory = await client.memories.create({
   agentOrigin: 'custom-integration',
 });
 
-console.log(source.data.id, results.count, memory.id);
+const memories = await client.memories.list({
+  kind: 'fact',
+  tag: 'architecture',
+  includeArchived: false,
+});
+
+await client.sources.reindex(source.data.id);
+
+console.log(source.data.id, results.count, memory.id, memories.total);
 ```
 
 The SDK throws `MnemisApiError` for non-2xx responses and preserves the HTTP
 status, API error code, message, and response details.
+
+`config.localPath` is intentionally disabled by default because it lets API
+users ask the worker to read local server files. Use it only in trusted local
+development with `MNEMIS_ALLOW_LOCAL_SOURCES=true`.

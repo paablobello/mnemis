@@ -4,6 +4,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   WORKER_ONCE: z.coerce.boolean().optional().default(false),
+  MNEMIS_ALLOW_LOCAL_SOURCES: z.coerce.boolean().optional().default(false),
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z
     .string()

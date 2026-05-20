@@ -5,7 +5,6 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url().optional(),
 
   API_HOST: z.string().default('0.0.0.0'),
   API_PORT: z.coerce.number().int().positive().default(8787),
@@ -24,6 +23,7 @@ const envSchema = z.object({
   INTERNAL_AUTH_SECRET: z.string().min(8),
 
   MNEMIS_MODE: z.enum(['self-host', 'cloud']).default('self-host'),
+  MNEMIS_ALLOW_LOCAL_SOURCES: z.coerce.boolean().optional().default(false),
 });
 
 export type Env = z.infer<typeof envSchema>;

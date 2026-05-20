@@ -123,6 +123,35 @@ describe('memories resource', () => {
     await c.memories.get('abc', { include: 'lineage' });
     assert.equal(calls[0]!.url, `${BASE}/v1/memories/abc?include=lineage`);
   });
+
+  it('list maps friendly query keys to API query params', async () => {
+    const { client: c, calls } = client(() => ok({ items: [], total: 0, has_more: false }));
+    await c.memories.list({
+      kind: 'fact',
+      tag: 'phase-4',
+      directory: '/repo',
+      agentOrigin: 'cli',
+      q: 'index',
+      includeArchived: true,
+      includeExpired: false,
+      include: ['lineage'],
+      limit: 5,
+      offset: 10,
+      createdAfter: '2026-05-20T00:00:00.000Z',
+      createdBefore: '2026-05-21T00:00:00.000Z',
+    });
+    assert.equal(
+      calls[0]!.url,
+      `${BASE}/v1/memories?kind=fact&tag=phase-4&directory=%2Frepo&agent_origin=cli&q=index&include_archived=true&include_expired=false&include=lineage&limit=5&offset=10&created_after=2026-05-20T00%3A00%3A00.000Z&created_before=2026-05-21T00%3A00%3A00.000Z`,
+    );
+  });
+
+  it('remove can request permanent deletion', async () => {
+    const { client: c, calls } = client(() => new Response(null, { status: 204 }));
+    await c.memories.remove('mem-1', { permanent: true });
+    assert.equal(calls[0]!.method, 'DELETE');
+    assert.equal(calls[0]!.url, `${BASE}/v1/memories/mem-1?permanent=true`);
+  });
 });
 
 describe('sources resource', () => {

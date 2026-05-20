@@ -2,12 +2,20 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MnemisApiError, createMnemisClient } from '@mnemis/sdk';
 import {
+  githubInstallationList,
+  githubInstallationRegister,
+  memoryDelete,
+  memoryList,
   memoryRetrieve,
   memorySave,
   memorySearch,
+  memoryUpdate,
+  sourceGet,
   sourceIndex,
   sourceList,
+  sourceReindex,
   sourceSearch,
+  sourceStatus,
 } from '../src/tools.ts';
 
 const BASE = 'http://localhost:9999';
@@ -138,6 +146,7 @@ describe('source_index tool', () => {
         branch: 'main',
         githubInstallationId: '12345',
         indexStrategy: 'webhook',
+        cronSchedule: undefined,
       },
     );
     const body = calls[0]!.body as { config: Record<string, unknown> };
@@ -177,6 +186,97 @@ describe('source_list tool', () => {
     assert.equal(calls[0]!.url, `${BASE}/v1/sources?kind=github_repo&limit=10`);
     assert.match(result.content[0]!.text, /My Repo/);
     assert.match(result.content[0]!.text, /last indexed:/);
+  });
+});
+
+describe('source operational tools', () => {
+  it('source_get fetches one source by id', async () => {
+    const { client, calls } = buildClient(() =>
+      ok({
+        data: {
+          id: '00000000-0000-0000-0000-000000000001',
+          kind: 'github_repo',
+          identifier: 'owner/repo',
+          display_name: 'owner/repo',
+          config: { branch: 'main' },
+          last_indexed_at: null,
+          last_change_at: null,
+          index_strategy: 'webhook',
+          cron_schedule: null,
+          status: 'indexed',
+          status_message: null,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+        },
+      }),
+    );
+    const result = await sourceGet({ client }, { id: '00000000-0000-0000-0000-000000000001' });
+    assert.equal(calls[0]!.url, `${BASE}/v1/sources/00000000-0000-0000-0000-000000000001`);
+    assert.match(result.content[0]!.text, /"branch": "main"/);
+  });
+
+  it('source_status renders latest job and chunk count', async () => {
+    const { client, calls } = buildClient(() =>
+      ok({
+        source: {
+          id: '00000000-0000-0000-0000-000000000001',
+          kind: 'github_repo',
+          identifier: 'owner/repo',
+          display_name: 'owner/repo',
+          config: {},
+          last_indexed_at: '2026-05-20T00:00:00.000Z',
+          last_change_at: null,
+          index_strategy: 'webhook',
+          cron_schedule: null,
+          status: 'indexed',
+          status_message: null,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+        },
+        chunk_count: 7,
+        latest_job: {
+          id: 'job-1',
+          kind: 'index_source',
+          status: 'completed',
+          payload: {},
+          progress: {},
+          result: null,
+          error: null,
+          scheduled_at: '2026-05-20T00:00:00.000Z',
+          started_at: null,
+          completed_at: null,
+          attempts: 1,
+        },
+      }),
+    );
+    const result = await sourceStatus({ client }, { id: '00000000-0000-0000-0000-000000000001' });
+    assert.equal(calls[0]!.url, `${BASE}/v1/sources/00000000-0000-0000-0000-000000000001/status`);
+    assert.match(result.content[0]!.text, /chunks: 7/);
+    assert.match(result.content[0]!.text, /job-1/);
+  });
+
+  it('source_reindex queues a reindex job', async () => {
+    const { client, calls } = buildClient(() =>
+      ok({
+        job: {
+          id: 'job-reindex',
+          kind: 'reindex_source',
+          status: 'queued',
+          payload: {},
+          progress: {},
+          result: null,
+          error: null,
+          scheduled_at: '2026-05-20T00:00:00.000Z',
+          started_at: null,
+          completed_at: null,
+          attempts: 0,
+        },
+      }),
+    );
+    const result = await sourceReindex({ client }, { id: '00000000-0000-0000-0000-000000000001' });
+    assert.equal(calls[0]!.method, 'POST');
+    assert.equal(calls[0]!.url, `${BASE}/v1/sources/00000000-0000-0000-0000-000000000001/reindex`);
+    assert.match(result.content[0]!.text, /job-reindex/);
   });
 });
 
@@ -268,6 +368,149 @@ describe('memory tools', () => {
       calls[0]!.url,
       `${BASE}/v1/memories/00000000-0000-0000-0000-000000000001?include=lineage`,
     );
+  });
+
+  it('memory_list GETs /v1/memories with filters', async () => {
+    const { client, calls } = buildClient(() => ok({ items: [], total: 0, has_more: false }));
+    await memoryList(
+      { client },
+      {
+        kind: 'fact',
+        tag: 'phase-4',
+        directory: '/repo',
+        includeArchived: true,
+        includeLineage: true,
+        limit: 5,
+        offset: 10,
+      },
+    );
+    assert.equal(
+      calls[0]!.url,
+      `${BASE}/v1/memories?kind=fact&tag=phase-4&directory=%2Frepo&include_archived=true&include=lineage&limit=5&offset=10`,
+    );
+  });
+
+  it('memory_update PATCHes mutable metadata fields', async () => {
+    const { client, calls } = buildClient(() =>
+      ok({
+        data: {
+          id: '00000000-0000-0000-0000-000000000001',
+          kind: 'fact',
+          title: 't',
+          summary: 's',
+          body: 'b',
+          tags: ['x'],
+          directory: null,
+          file_overlap: [],
+          agent_origin: null,
+          ttl_seconds: null,
+          expires_at: null,
+          archived_at: null,
+          source_ids: [],
+          derived_from: null,
+          confidence: null,
+          tool_calls: [],
+          model_version: null,
+          edited_files: [],
+          metadata: { source: 'test' },
+          workspace_id: 'ws',
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+        },
+      }),
+    );
+    await memoryUpdate(
+      { client },
+      {
+        id: '00000000-0000-0000-0000-000000000001',
+        tags: ['x'],
+        ttlSeconds: null,
+        metadata: { source: 'test' },
+      },
+    );
+    assert.equal(calls[0]!.method, 'PATCH');
+    assert.deepEqual(calls[0]!.body, {
+      tags: ['x'],
+      ttlSeconds: null,
+      metadata: { source: 'test' },
+    });
+  });
+
+  it('memory_delete soft-deletes by default and supports permanent delete', async () => {
+    const { client, calls } = buildClient(() => new Response(null, { status: 204 }));
+    await memoryDelete({ client }, { id: '00000000-0000-0000-0000-000000000001' });
+    await memoryDelete({ client }, { id: '00000000-0000-0000-0000-000000000002', permanent: true });
+    assert.equal(calls[0]!.url, `${BASE}/v1/memories/00000000-0000-0000-0000-000000000001`);
+    assert.equal(
+      calls[1]!.url,
+      `${BASE}/v1/memories/00000000-0000-0000-0000-000000000002?permanent=true`,
+    );
+  });
+});
+
+describe('github installation tools', () => {
+  it('lists and registers installations', async () => {
+    const responses = [
+      ok({
+        items: [
+          {
+            id: 'ghi-1',
+            workspace_id: 'ws',
+            installation_id: '12345',
+            account_login: 'owner',
+            account_type: 'Organization',
+            repository_selection: 'selected',
+            permissions: {},
+            events: ['push'],
+            installed_at: '2026-05-20T00:00:00.000Z',
+            suspended_at: null,
+            deleted_at: null,
+            created_at: '2026-05-20T00:00:00.000Z',
+            updated_at: '2026-05-20T00:00:00.000Z',
+          },
+        ],
+      }),
+      ok({
+        data: {
+          id: 'ghi-2',
+          workspace_id: 'ws',
+          installation_id: '67890',
+          account_login: 'new-owner',
+          account_type: 'Organization',
+          repository_selection: 'selected',
+          permissions: {},
+          events: ['push'],
+          installed_at: '2026-05-20T00:00:00.000Z',
+          suspended_at: null,
+          deleted_at: null,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+        },
+      }),
+    ];
+    const { client, calls } = buildClient(() => responses.shift()!);
+    const list = await githubInstallationList({ client });
+    const registered = await githubInstallationRegister(
+      { client },
+      {
+        installationId: '67890',
+        accountLogin: 'new-owner',
+        accountType: 'Organization',
+        repositorySelection: 'selected',
+        events: ['push'],
+      },
+    );
+    assert.equal(calls[0]!.url, `${BASE}/v1/github/installations`);
+    assert.equal(calls[1]!.method, 'POST');
+    assert.deepEqual(calls[1]!.body, {
+      installationId: '67890',
+      accountLogin: 'new-owner',
+      accountType: 'Organization',
+      repositorySelection: 'selected',
+      events: ['push'],
+    });
+    assert.match(list.content[0]!.text, /owner/);
+    assert.match(registered.content[0]!.text, /new-owner/);
   });
 });
 

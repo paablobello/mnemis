@@ -7,9 +7,11 @@ import type {
   ChunkSearchResponse,
   CreateMemoryInput,
   CreateSourceInput,
+  GitHubInstallationDto,
   JobDto,
   MemoryDto,
   MnemisClient,
+  PatchMemoryInput,
   SourceDto,
   SourceListResponse,
   SourceStatusDto,
@@ -76,6 +78,25 @@ function memory(overrides: Partial<MemoryDto> = {}): MemoryDto {
     model_version: null,
     edited_files: [],
     metadata: {},
+    created_at: '2026-05-20T00:00:00.000Z',
+    updated_at: '2026-05-20T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function githubInstallation(overrides: Partial<GitHubInstallationDto> = {}): GitHubInstallationDto {
+  return {
+    id: 'ghi-1',
+    workspace_id: 'workspace-1',
+    installation_id: '12345',
+    account_login: 'owner',
+    account_type: 'Organization',
+    repository_selection: 'selected',
+    permissions: {},
+    events: ['push'],
+    installed_at: '2026-05-20T00:00:00.000Z',
+    suspended_at: null,
+    deleted_at: null,
     created_at: '2026-05-20T00:00:00.000Z',
     updated_at: '2026-05-20T00:00:00.000Z',
     ...overrides,
@@ -255,6 +276,37 @@ describe('source commands', () => {
     });
   });
 
+  it('passes cron schedule for scheduled docs indexing', async () => {
+    const inputs: CreateSourceInput[] = [];
+    const svc = services({
+      sources: {
+        async create(value: CreateSourceInput) {
+          inputs.push(value);
+          return {
+            data: source({
+              kind: 'docs_site',
+              identifier: 'https://docs.example.com',
+              index_strategy: 'cron',
+              cron_schedule: '0 3 * * *',
+            }),
+            job: job(),
+          };
+        },
+      } as MnemisClient['sources'],
+    });
+
+    const result = await capture(() =>
+      dispatch(
+        ['docs', 'add', 'https://docs.example.com', '--strategy', 'cron', '--cron', '0 3 * * *'],
+        svc,
+      ),
+    );
+
+    assert.equal(result.result.exitCode, 0);
+    assert.equal(inputs[0]?.indexStrategy, 'cron');
+    assert.equal(inputs[0]?.cronSchedule, '0 3 * * *');
+  });
+
   it('lists status through the status alias', async () => {
     const calls: unknown[] = [];
     const svc = services({
@@ -285,6 +337,31 @@ describe('source commands', () => {
 
     const output = await capture(() => dispatch(['sources', 'status', 'source-1'], svc));
     assert.match(output.stdout, /chunks:\s+12/);
+  });
+
+  it('gets a source and queues reindex jobs', async () => {
+    const calls: string[] = [];
+    const svc = services({
+      sources: {
+        async get(id: string) {
+          calls.push(`get:${id}`);
+          return { data: source({ id, status: 'indexed' }) };
+        },
+        async reindex(id: string) {
+          calls.push(`reindex:${id}`);
+          return { job: job({ id: 'job-reindex', kind: 'reindex_source' }) };
+        },
+      } as MnemisClient['sources'],
+    });
+
+    const get = await capture(() => dispatch(['sources', 'get', 'source-1'], svc));
+    const reindex = await capture(() => dispatch(['sources', 'reindex', 'source-1'], svc));
+
+    assert.equal(get.result.exitCode, 0);
+    assert.match(get.stdout, /source-1/);
+    assert.equal(reindex.result.exitCode, 0);
+    assert.match(reindex.stdout, /job-reindex/);
+    assert.deepEqual(calls, ['get:source-1', 'reindex:source-1']);
   });
 });
 
@@ -402,6 +479,112 @@ describe('search and memory commands', () => {
     assert.deepEqual(calls, ['semantic', 'keyword']);
   });
 
+  it('lists memories with filters', async () => {
+    const calls: unknown[] = [];
+    const svc = services({
+      memories: {
+        async list(query: unknown) {
+          calls.push(query);
+          return {
+            items: [memory({ title: 'Filtered', tags: ['phase-4'] })],
+            total: 1,
+            has_more: false,
+          };
+        },
+      } as MnemisClient['memories'],
+    });
+
+    const output = await capture(() =>
+      dispatch(
+        [
+          'memory',
+          'list',
+          '--kind',
+          'fact',
+          '--tag',
+          'phase-4',
+          '--directory',
+          '/repo',
+          '--q',
+          'filter',
+          '--include-archived',
+          '--limit',
+          '10',
+          '--offset',
+          '5',
+          '--lineage',
+        ],
+        svc,
+      ),
+    );
+
+    assert.equal(output.result.exitCode, 0);
+    assert.match(output.stdout, /Filtered/);
+    assert.deepEqual(calls[0], {
+      kind: 'fact',
+      tag: 'phase-4',
+      directory: '/repo',
+      q: 'filter',
+      includeArchived: true,
+      includeExpired: undefined,
+      include: ['lineage'],
+      limit: 10,
+      offset: 5,
+    });
+  });
+
+  it('updates, archives, restores and deletes memories', async () => {
+    const patches: Array<{ id: string; input: PatchMemoryInput }> = [];
+    const deletes: Array<{ id: string; permanent?: boolean }> = [];
+    const svc = services({
+      memories: {
+        async patch(id: string, input: PatchMemoryInput) {
+          patches.push({ id, input });
+          return memory({ id, archived_at: input.archived ? '2026-05-20T00:00:00.000Z' : null });
+        },
+        async remove(id: string, options?: { permanent?: boolean }) {
+          deletes.push({ id, permanent: options?.permanent });
+        },
+      } as MnemisClient['memories'],
+    });
+
+    await capture(() =>
+      dispatch(
+        [
+          'memory',
+          'update',
+          'memory-1',
+          '--kind',
+          'procedural',
+          '--tag',
+          'cli',
+          '--no-ttl',
+          '--metadata-json',
+          '{"source":"test"}',
+        ],
+        svc,
+      ),
+    );
+    await capture(() => dispatch(['memory', 'archive', 'memory-1'], svc));
+    await capture(() => dispatch(['memory', 'restore', 'memory-1'], svc));
+    await capture(() => dispatch(['memory', 'delete', 'memory-1', '--permanent'], svc));
+
+    assert.deepEqual(patches, [
+      {
+        id: 'memory-1',
+        input: {
+          kind: 'procedural',
+          tags: ['cli'],
+          ttlSeconds: null,
+          metadata: { source: 'test' },
+        },
+      },
+      { id: 'memory-1', input: { archived: true } },
+      { id: 'memory-1', input: { archived: false } },
+    ]);
+    assert.deepEqual(deletes, [{ id: 'memory-1', permanent: true }]);
+  });
+
   it('fails before client creation on invalid numbers', async () => {
     let clientCalls = 0;
     const svc: CliServices = {
@@ -420,5 +603,58 @@ describe('search and memory commands', () => {
 
     assert.equal(clientCalls, 0);
     assert.match(output.stderr, /--limit must be a positive integer/);
+  });
+});
+
+describe('github commands', () => {
+  it('lists and registers GitHub App installations', async () => {
+    const registrations: unknown[] = [];
+    const svc = services({
+      github: {
+        async listInstallations() {
+          return { items: [githubInstallation()] };
+        },
+        async registerInstallation(input: unknown) {
+          registrations.push(input);
+          return { data: githubInstallation({ account_login: 'new-owner' }) };
+        },
+      } as MnemisClient['github'],
+    });
+
+    const list = await capture(() => dispatch(['github', 'installations', 'list'], svc));
+    const register = await capture(() =>
+      dispatch(
+        [
+          'github',
+          'installations',
+          'register',
+          '--installation',
+          '67890',
+          '--account',
+          'new-owner',
+          '--account-type',
+          'Organization',
+          '--repository-selection',
+          'selected',
+          '--event',
+          'push',
+          '--permissions-json',
+          '{"contents":"read"}',
+        ],
+        svc,
+      ),
+    );
+
+    assert.match(list.stdout, /owner/);
+    assert.match(register.stdout, /new-owner/);
+    assert.deepEqual(registrations[0], {
+      installationId: '67890',
+      accountLogin: 'new-owner',
+      accountType: 'Organization',
+      repositorySelection: 'selected',
+      permissions: { contents: 'read' },
+      events: ['push'],
+      installedAt: undefined,
+    });
   });
 });
