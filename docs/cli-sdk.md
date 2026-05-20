@@ -159,12 +159,16 @@ Search reranking is optional and supports two providers:
 - `MNEMIS_RERANK_PROVIDER=voyage` plus `VOYAGE_API_KEY` — calls Voyage's
   rerank-2.5 API on the post-fusion candidate pool. Lowest latency, requires
   internet egress.
-- `MNEMIS_RERANK_PROVIDER=local` — runs `Xenova/bge-reranker-v2-m3` locally
-  via `@huggingface/transformers` (ONNX runtime). The model (~140MB
-  quantized) downloads on first use into the Transformers cache directory;
-  subsequent reranks are local-only. Override the model with
-  `MNEMIS_LOCAL_RERANK_MODEL=<huggingface-id>` if you ship a different
-  cross-encoder.
+- `MNEMIS_RERANK_PROVIDER=local` — runs `Xenova/bge-reranker-base` locally
+  via `@huggingface/transformers` (ONNX runtime, q8 quantization, ~120 MB
+  on disk). The model downloads on first use into the Transformers cache
+  directory; subsequent reranks are local-only. Override the model with
+  `MNEMIS_LOCAL_RERANK_MODEL=<huggingface-id>`. The default was the
+  smaller-but-publicly-downloadable BGE base because the
+  `Xenova/bge-reranker-v2-m3` repository is currently gated on Hugging
+  Face and fails with `Unauthorized` on first download. Our 2026-05-20
+  baseline shows the local reranker more than doubles nDCG/MRR over
+  plain BM25 — see [`reports/2026-05-20-baseline.md`](../reports/2026-05-20-baseline.md).
 
 Leaving `MNEMIS_RERANK_PROVIDER` unset keeps the pure Postgres BM25 + vector
 RRF fusion already used today.

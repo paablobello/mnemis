@@ -117,23 +117,29 @@ function table(rows: Array<Record<string, string | number>>): void {
 async function main(): Promise<void> {
   const client = await ensureClient();
   const queries = await loadQueries();
-  const identifier = `mnemis/benchmark-${Date.now()}`;
-  console.log(`Indexing local repo at ${REPO_ROOT} as source ${identifier}…`);
-
+  const reuseId = process.env.MNEMIS_BENCHMARK_SOURCE_ID?.trim();
   let sourceId: string | null = null;
   try {
-    const created = await client.sources.create({
-      kind: 'github_repo',
-      identifier,
-      displayName: 'mnemis-benchmark',
-      config: { localPath: REPO_ROOT },
-      indexStrategy: 'manual',
-      enqueue: true,
-    });
-    sourceId = created.data.id;
-    console.log(`Source ${sourceId} created; waiting for indexing…`);
-    await waitForIndexed(client, sourceId);
-    console.log('Indexing complete. Running queries…');
+    if (reuseId) {
+      sourceId = reuseId;
+      console.log(`Reusing already-indexed source ${sourceId} (skipping indexing).`);
+    } else {
+      const identifier = `mnemis/benchmark-${Date.now()}`;
+      console.log(`Indexing local repo at ${REPO_ROOT} as source ${identifier}…`);
+      const created = await client.sources.create({
+        kind: 'github_repo',
+        identifier,
+        displayName: 'mnemis-benchmark',
+        config: { localPath: REPO_ROOT },
+        indexStrategy: 'manual',
+        enqueue: true,
+      });
+      sourceId = created.data.id;
+      console.log(`Source ${sourceId} created; waiting for indexing…`);
+      await waitForIndexed(client, sourceId);
+      console.log(`Indexing complete. Source id for re-runs: ${sourceId}`);
+      console.log('  (export MNEMIS_BENCHMARK_SOURCE_ID=<id> to reuse it)\n');
+    }
 
     const stats: VariantStats[] = [];
     for (const variant of RETRIEVAL_VARIANTS) {
@@ -173,7 +179,7 @@ async function main(): Promise<void> {
     }
     throw err;
   } finally {
-    if (sourceId) {
+    if (sourceId && !reuseId) {
       try {
         await client.raw.request({ method: 'DELETE', path: `/v1/sources/${sourceId}` });
       } catch {

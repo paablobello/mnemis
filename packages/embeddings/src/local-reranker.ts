@@ -8,7 +8,7 @@
  */
 import type { PreTrainedModel, PreTrainedTokenizer } from '@huggingface/transformers';
 
-export type LocalRerankModel = 'Xenova/bge-reranker-v2-m3' | string;
+export type LocalRerankModel = 'Xenova/bge-reranker-base' | 'Xenova/bge-reranker-large' | string;
 
 export interface LocalRerankResult {
   results: Array<{ index: number; relevanceScore: number }>;
@@ -42,7 +42,7 @@ async function loadPipeline(modelId: string, cacheDir: string | null): Promise<L
   }
   const tokenizer = await transformers.AutoTokenizer.from_pretrained(modelId);
   const model = await transformers.AutoModelForSequenceClassification.from_pretrained(modelId, {
-    // Defaults to fp32; quantized files exist for bge-reranker-v2-m3.
+    // Quantized variant keeps the model under ~120MB on disk; fp32 also works.
     dtype: 'q8',
   });
   return { tokenizer, model };
@@ -71,7 +71,7 @@ export class LocalRerankerClient {
   private readonly cacheDir: string | null;
 
   constructor(options: LocalRerankerOptions = {}) {
-    this.modelId = options.modelId ?? 'Xenova/bge-reranker-v2-m3';
+    this.modelId = options.modelId ?? 'Xenova/bge-reranker-base';
     this.cacheDir = options.cacheDir ?? null;
   }
 
@@ -138,7 +138,7 @@ let singleton: LocalRerankerClient | null = null;
 let singletonModelId: string | null = null;
 
 export function getLocalReranker(options: LocalRerankerOptions = {}): LocalRerankerClient {
-  const modelId = options.modelId ?? 'Xenova/bge-reranker-v2-m3';
+  const modelId = options.modelId ?? 'Xenova/bge-reranker-base';
   if (!singleton || singletonModelId !== modelId) {
     singleton = new LocalRerankerClient(options);
     singletonModelId = modelId;

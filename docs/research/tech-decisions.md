@@ -367,3 +367,27 @@ Para medir calidad de retrieval objetivamente:
 - pgvector — https://github.com/pgvector/pgvector
 - Firecrawl — https://www.firecrawl.dev
 - tree-sitter — https://tree-sitter.github.io
+
+---
+
+## Baseline retrieval — 2026-05-20
+
+First reproducible measurement of the retrieval stack against the curated
+`packages/eval/data/mnemis-self/queries.json` dataset (10 queries on the
+Mnemis repo itself, commit `1385e1e`). Full report:
+[`reports/2026-05-20-baseline.md`](../../reports/2026-05-20-baseline.md).
+
+| variant                | nDCG@10 | MRR@10 | Recall@5 |
+| ---------------------- | ------- | ------ | -------- |
+| keyword (no rerank)    | 0.197   | 0.233  | 0.192    |
+| keyword + local rerank | 0.433   | 0.481  | 0.317    |
+
+The local BGE-base cross-encoder more than doubles nDCG and MRR over plain
+Postgres BM25 in this corpus, and lifts Recall@5 by ~65 %. Voyage embeddings
+and Voyage rerank were not measured (no `VOYAGE_API_KEY` configured); fill
+that in and rerun `bun run benchmark` to fill the missing rows.
+
+Default local model is now `Xenova/bge-reranker-base` (q8 ONNX, ~120 MB on
+disk). `Xenova/bge-reranker-v2-m3` is currently gated on Hugging Face and
+fails with `Unauthorized` on first download — override via
+`MNEMIS_LOCAL_RERANK_MODEL` once that gating is lifted.

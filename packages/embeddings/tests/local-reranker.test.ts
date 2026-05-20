@@ -17,9 +17,9 @@ describe('local reranker', () => {
   });
 
   it('exposes a typed client with the configured modelId', () => {
-    const client = getLocalReranker({ modelId: 'Xenova/bge-reranker-v2-m3' });
+    const client = getLocalReranker({ modelId: 'Xenova/bge-reranker-base' });
     assert.ok(client instanceof LocalRerankerClient);
-    assert.equal(client.modelId, 'Xenova/bge-reranker-v2-m3');
+    assert.equal(client.modelId, 'Xenova/bge-reranker-base');
   });
 
   it('returns an empty result without loading the model when there are no documents', async () => {
@@ -27,7 +27,7 @@ describe('local reranker', () => {
     const result = await client.rerank('any query', []);
     assert.deepEqual(result, {
       results: [],
-      model: 'Xenova/bge-reranker-v2-m3',
+      model: 'Xenova/bge-reranker-base',
       totalTokens: 0,
     });
   });
