@@ -377,17 +377,22 @@ First reproducible measurement of the retrieval stack against the curated
 Mnemis repo itself, commit `1385e1e`). Full report:
 [`reports/2026-05-20-baseline.md`](../../reports/2026-05-20-baseline.md).
 
-| variant                | nDCG@10 | MRR@10 | Recall@5 |
-| ---------------------- | ------- | ------ | -------- |
-| keyword (no rerank)    | 0.197   | 0.233  | 0.192    |
-| keyword + local rerank | 0.433   | 0.481  | 0.317    |
+| variant | reranker | nDCG@10 | MRR@10 | Recall@5 |
+| --- | --- | --- | --- | --- |
+| keyword | — | 0.193 | 0.229 | 0.192 |
+| keyword | local BGE-base | 0.414 | 0.492 | 0.317 |
+| keyword | Voyage rerank-2.5 | **0.502** | **0.575** | **0.567** |
+| hybrid  | — | 0.057 | 0.164 | 0.108 |
+| hybrid  | local BGE-base | 0.361 | 0.494 | 0.317 |
+| hybrid  | Voyage rerank-2.5 | 0.441 | 0.525 | 0.467 |
 
-The local BGE-base cross-encoder more than doubles nDCG and MRR over plain
-Postgres BM25 in this corpus, and lifts Recall@5 by ~65 %. Voyage embeddings
-and Voyage rerank were not measured (no `VOYAGE_API_KEY` configured); fill
-that in and rerun `bun run benchmark` to fill the missing rows.
+Three things stand out: Voyage rerank-2.5 nearly triples nDCG@10 over plain
+BM25, the local BGE-base ONNX model is the strong free fallback (about half
+the Voyage lift, no API call), and hybrid retrieval *without* a reranker
+under-performs keyword on this dataset because the queries are highly lexical
+and Voyage vectors surface semantically-close but off-topic chunks.
 
-Default local model is now `Xenova/bge-reranker-base` (q8 ONNX, ~120 MB on
-disk). `Xenova/bge-reranker-v2-m3` is currently gated on Hugging Face and
-fails with `Unauthorized` on first download — override via
-`MNEMIS_LOCAL_RERANK_MODEL` once that gating is lifted.
+Default local model is `Xenova/bge-reranker-base` (q8 ONNX, ~120 MB on disk).
+`Xenova/bge-reranker-v2-m3` is currently gated on Hugging Face
+(`Unauthorized` on first download) — override via `MNEMIS_LOCAL_RERANK_MODEL`
+when that gating is lifted.

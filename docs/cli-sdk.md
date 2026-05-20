@@ -166,9 +166,14 @@ Search reranking is optional and supports two providers:
   `MNEMIS_LOCAL_RERANK_MODEL=<huggingface-id>`. The default was the
   smaller-but-publicly-downloadable BGE base because the
   `Xenova/bge-reranker-v2-m3` repository is currently gated on Hugging
-  Face and fails with `Unauthorized` on first download. Our 2026-05-20
-  baseline shows the local reranker more than doubles nDCG/MRR over
-  plain BM25 — see [`reports/2026-05-20-baseline.md`](../reports/2026-05-20-baseline.md).
+  Face and fails with `Unauthorized` on first download.
+
+Our 2026-05-20 baseline shows Voyage rerank lifts nDCG@10 from 0.19 → 0.50
+(+160%) on top of plain BM25, while the local BGE-base cross-encoder lifts
+it to 0.41 (+115%). Hybrid retrieval *without* a reranker underperforms
+keyword on highly lexical queries — pair hybrid with rerank to get the
+full benefit. Full numbers in
+[`reports/2026-05-20-baseline.md`](../reports/2026-05-20-baseline.md).
 
 Leaving `MNEMIS_RERANK_PROVIDER` unset keeps the pure Postgres BM25 + vector
 RRF fusion already used today.

@@ -15,7 +15,7 @@ Mnemis combines:
 
 1. **Memory** — agents save plans, decisions, and conversation state with typed TTLs (working / session / fact / procedural). Other agents pick up where they left off.
 2. **Indexing** — GitHub repos and docs sites through the worker, with include/exclude filters, docs crawling, and optional contextual prefixes.
-3. **Retrieval** — keyword or hybrid vector + Postgres full-text retrieval with RRF-style fusion, optional Voyage or local BGE reranking, and cited raw, markdown or synthesized responses. Permalinks pin to the indexed commit SHA. The local cross-encoder more than doubles nDCG/MRR over plain BM25 on our [self-corpus baseline](./reports/2026-05-20-baseline.md).
+3. **Retrieval** — keyword or hybrid vector + Postgres full-text retrieval with RRF-style fusion, optional Voyage or local BGE reranking, and cited raw, markdown or synthesized responses. Permalinks pin to the indexed commit SHA. Our [self-corpus baseline](./reports/2026-05-20-baseline.md) shows Voyage rerank lifting nDCG@10 from 0.19 → 0.50 (+160%) and local BGE rerank from 0.19 → 0.41 (+115%) on top of plain BM25.
 4. **MCP first** — works with Cursor, Claude Code, Codex, Windsurf, Zed out of the box.
 
 ## Quick start

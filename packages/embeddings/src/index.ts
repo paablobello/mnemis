@@ -3,7 +3,11 @@ import { resetLocalRerankerForTests } from './local-reranker.ts';
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
 const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
-const MAX_BATCH = 128;
+// Voyage caps each embedding request at 120k tokens. With contextual prefixes
+// our chunks can run ~900-1000 tokens each, so 128 chunks routinely exceed
+// the cap. 64 keeps batches comfortably under the limit while still amortising
+// the HTTP round trip.
+const MAX_BATCH = 64;
 const CACHE_LIMIT = 2_000;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 
