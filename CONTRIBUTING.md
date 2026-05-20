@@ -38,6 +38,35 @@ To index private GitHub repositories, register a GitHub App (Settings → Develo
 
 Without these vars the worker still clones **public** repos; sources that set `config.githubInstallationId` will fail with `github_app_not_configured`.
 
+### Running the MCP server
+
+`apps/mcp` exposes Mnemis as an MCP server over stdio for clients like Cursor, Claude Code, or any other MCP-aware agent.
+
+```bash
+export MNEMIS_API_URL=http://localhost:8787
+export MNEMIS_API_KEY=mn_test_...
+bun --filter @mnemis/mcp dev
+```
+
+Tools registered: `source_search`, `source_index`, `source_list`, `memory_save`, `memory_search`, `memory_retrieve`.
+
+To wire it into Claude Code, add to `~/.config/claude-code/mcp.json` (or the equivalent for your client):
+
+```json
+{
+  "mcpServers": {
+    "mnemis": {
+      "command": "node",
+      "args": ["--experimental-strip-types", "/path/to/mnemis/apps/mcp/src/index.ts"],
+      "env": {
+        "MNEMIS_API_URL": "http://localhost:8787",
+        "MNEMIS_API_KEY": "mn_test_..."
+      }
+    }
+  }
+}
+```
+
 ## Project structure
 
 ```
