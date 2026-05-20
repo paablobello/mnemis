@@ -379,20 +379,38 @@ Mnemis repo itself, commit `1385e1e`). Full report:
 
 | variant | reranker | nDCG@10 | MRR@10 | Recall@5 |
 | --- | --- | --- | --- | --- |
-| keyword | — | 0.193 | 0.229 | 0.192 |
-| keyword | local BGE-base | 0.414 | 0.492 | 0.317 |
-| keyword | Voyage rerank-2.5 | **0.502** | **0.575** | **0.567** |
-| hybrid  | — | 0.057 | 0.164 | 0.108 |
-| hybrid  | local BGE-base | 0.361 | 0.494 | 0.317 |
-| hybrid  | Voyage rerank-2.5 | 0.441 | 0.525 | 0.467 |
+| keyword | — | 0.197 | 0.235 | 0.192 |
+| keyword | local BGE-base | 0.421 | 0.483 | 0.367 |
+| keyword | Voyage rerank-2.5 | **0.509** | **0.575** | **0.617** |
+| hybrid | — | 0.043 | 0.233 | 0.108 |
+| hybrid | local BGE-base | 0.346 | 0.439 | 0.317 |
+| hybrid | Voyage rerank-2.5 | 0.441 | 0.525 | 0.467 |
 
-Three things stand out: Voyage rerank-2.5 nearly triples nDCG@10 over plain
-BM25, the local BGE-base ONNX model is the strong free fallback (about half
-the Voyage lift, no API call), and hybrid retrieval *without* a reranker
-under-performs keyword on this dataset because the queries are highly lexical
-and Voyage vectors surface semantically-close but off-topic chunks.
+Embeddings: `voyage-4-large` for general chunks, `voyage-code-3` for
+code-tagged chunks. Default rerank model is `Xenova/bge-reranker-base`
+(q8 ONNX, ~120 MB on disk) — `Xenova/bge-reranker-v2-m3` is gated on
+Hugging Face, override with `MNEMIS_LOCAL_RERANK_MODEL` when that
+opens up.
 
-Default local model is `Xenova/bge-reranker-base` (q8 ONNX, ~120 MB on disk).
-`Xenova/bge-reranker-v2-m3` is currently gated on Hugging Face
-(`Unauthorized` on first download) — override via `MNEMIS_LOCAL_RERANK_MODEL`
-when that gating is lifted.
+Three findings on this corpus:
+
+- Voyage rerank-2.5 nearly triples nDCG@10 over plain BM25 and **triples
+  Recall@5** (0.192 → 0.617).
+- The local BGE-base cross-encoder is the strong free fallback
+  (~half the Voyage lift, no API call).
+- Hybrid retrieval *without* a reranker under-performs keyword on this
+  dataset because the queries are highly lexical and Voyage vectors
+  surface semantically-close but off-topic chunks.
+
+The previous baseline used `voyage-3-large`, which Voyage now classifies
+as "older" (no free tokens, $0.18/M). Switching to `voyage-4-large`
+(200 M tokens free per month, $0.12/M) kept quality within ±0.01 nDCG
+across the board and improved keyword+Voyage Recall@5 by +9%. Net win.
+
+A separate experiment with Anthropic contextual prefixes enabled
+(Haiku 4.5 over 91 doc chunks) **lowered** every metric — most likely
+because the LLM prefixes repeat domain terms across sibling chunks and
+flatten BM25's IDF. Contextual prefix is a documented +49% retrieval
+boost on natural prose; on a code corpus with terse queries it is at
+best neutral. We keep the feature opt-in via `contextualPrefixMode`
+and recommend evaluating per-corpus before turning it on.

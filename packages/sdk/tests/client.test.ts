@@ -270,7 +270,7 @@ describe('search', () => {
         query: 'q',
         retrieval: 'hybrid_rrf',
         used_vector: true,
-        embedding_model: 'voyage-3-large',
+        embedding_model: 'voyage-4-large',
         embedding_tokens: 4,
         reranked: false,
         reranker_model: null,

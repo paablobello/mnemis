@@ -3,7 +3,7 @@ import type { SourceKind } from '@mnemis/db';
 import type { IndexChunk, IndexSourceConfig, LoadedFile } from '@mnemis/indexer';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
+const DEFAULT_MODEL = 'claude-haiku-4-5';
 const DEFAULT_MAX_DOCUMENT_CHARS = 80_000;
 const DEFAULT_MAX_CHUNK_CHARS = 8_000;
 const MAX_PREFIX_CHARS = 1_000;

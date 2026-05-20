@@ -354,7 +354,7 @@ describe('keyword search', () => {
         kind: 'fact',
         title: 'voyage embeddings',
         summary: 'embedding selection',
-        body: 'voyage-3-large 1024 dims is the cloud default model for memories',
+        body: 'voyage-4-large 1024 dims is the cloud default model for memories',
         tags: ['stest', 'embeddings'],
       },
       {

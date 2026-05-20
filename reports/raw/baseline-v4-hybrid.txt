@@ -1,0 +1,12 @@
+$ bun --filter @mnemis/eval benchmark
+@mnemis/eval benchmark: (node:41686) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+@mnemis/eval benchmark: (Use `node --trace-warnings ...` to show where the warning was created)
+@mnemis/eval benchmark: Reusing already-indexed source 82d3c67e-7624-448e-8a11-54afe827ddb1 (skipping indexing).
+@mnemis/eval benchmark: 
+@mnemis/eval benchmark: Retrieval provider in effect on API: none
+@mnemis/eval benchmark: 
+@mnemis/eval benchmark: variant  ndcg10  mrr10  recall5
+@mnemis/eval benchmark: -------  ------  -----  -------
+@mnemis/eval benchmark: keyword  0.056   0.148  0.108  
+@mnemis/eval benchmark: hybrid   0.047   0.25   0.108  
+@mnemis/eval benchmark: Exited with code 0

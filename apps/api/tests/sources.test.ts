@@ -774,7 +774,7 @@ describe('source chunk search', () => {
       const json = await res.json();
       assert.equal(json.mode, 'synthesized');
       assert.match(json.answer, /\[1\]/);
-      assert.equal(json.synthesis_model, 'claude-3-5-haiku-latest');
+      assert.equal(json.synthesis_model, 'claude-haiku-4-5');
       assert.equal(json.synthesis_usage.input_tokens, 120);
       assert.ok(capturedBody, 'expected Anthropic to be called');
       assert.match(
@@ -816,7 +816,7 @@ describe('source chunk search', () => {
     const json = await res.json();
     assert.equal(json.retrieval, 'hybrid_rrf');
     assert.equal(json.used_vector, true);
-    assert.equal(json.embedding_model, 'voyage-3-large');
+    assert.equal(json.embedding_model, 'voyage-4-large');
     assert.equal(json.embedding_tokens, 1);
     assert.equal(json.items[0].path, 'docs/auth.md');
     assert.equal(json.items[0].ranks.bm25, null);

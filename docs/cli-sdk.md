@@ -168,9 +168,10 @@ Search reranking is optional and supports two providers:
   `Xenova/bge-reranker-v2-m3` repository is currently gated on Hugging
   Face and fails with `Unauthorized` on first download.
 
-Our 2026-05-20 baseline shows Voyage rerank lifts nDCG@10 from 0.19 → 0.50
-(+160%) on top of plain BM25, while the local BGE-base cross-encoder lifts
-it to 0.41 (+115%). Hybrid retrieval *without* a reranker underperforms
+Our 2026-05-20 baseline (against `voyage-4-large` embeddings) shows Voyage
+rerank lifts nDCG@10 from 0.20 → 0.51 (+158%) on top of plain BM25, with
+Recall@5 tripling (0.19 → 0.62). The local BGE-base cross-encoder lifts
+nDCG to 0.42 (+113%). Hybrid retrieval *without* a reranker underperforms
 keyword on highly lexical queries — pair hybrid with rerank to get the
 full benefit. Full numbers in
 [`reports/2026-05-20-baseline.md`](../reports/2026-05-20-baseline.md).

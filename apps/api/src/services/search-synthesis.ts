@@ -2,7 +2,7 @@ import type { SearchCitation } from './search-render.ts';
 import type { ChunkSearchHit } from './source-search.ts';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
+const DEFAULT_MODEL = 'claude-haiku-4-5';
 const MAX_CHUNK_CHARS = 2_500;
 const MAX_OUTPUT_TOKENS = 1_024;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;

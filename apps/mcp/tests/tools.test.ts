@@ -101,12 +101,12 @@ describe('source_search tool', () => {
         items: [],
         citations: [],
         answer: 'It uses contextual prefixes [1].',
-        synthesis_model: 'claude-3-5-haiku-latest',
+        synthesis_model: 'claude-haiku-4-5',
       }),
     );
     const result = await sourceSearch({ client }, { query: 'how', mode: 'synthesized' });
     assert.match(result.content[0]!.text, /\[1\]/);
-    assert.match(result.content[0]!.text, /claude-3-5-haiku-latest/);
+    assert.match(result.content[0]!.text, /claude-haiku-4-5/);
   });
 });
 
