@@ -27,6 +27,20 @@
         "typescript": "^5.6.3",
       },
     },
+    "apps/cli": {
+      "name": "@mnemis/cli",
+      "version": "0.0.0",
+      "bin": {
+        "mnemis": "bin/mnemis.js",
+      },
+      "dependencies": {
+        "@mnemis/sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^22.9.0",
+        "typescript": "^5.6.3",
+      },
+    },
     "apps/mcp": {
       "name": "@mnemis/mcp",
       "version": "0.0.0",
@@ -178,6 +192,8 @@
     "@hono/node-server": ["@hono/node-server@1.19.14", "", { "peerDependencies": { "hono": "^4" } }, "sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw=="],
 
     "@mnemis/api": ["@mnemis/api@workspace:apps/api"],
+
+    "@mnemis/cli": ["@mnemis/cli@workspace:apps/cli"],
 
     "@mnemis/db": ["@mnemis/db@workspace:packages/db"],
 

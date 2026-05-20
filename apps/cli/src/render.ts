@@ -1,0 +1,87 @@
+import type {
+  ChunkSearchResponse,
+  MemoryDto,
+  MemoryListResponse,
+  SourceDto,
+  SourceListResponse,
+  SourceStatusDto,
+} from '@mnemis/sdk';
+
+export function renderSearch(response: ChunkSearchResponse): string {
+  if (response.mode === 'markdown' && response.markdown) {
+    return response.markdown;
+  }
+  if (response.mode === 'synthesized' && response.answer) {
+    return `${response.answer}\n\n— model: ${response.synthesis_model ?? 'unknown'} · retrieval: ${response.retrieval}`;
+  }
+  return JSON.stringify(response, null, 2);
+}
+
+export function renderSources(response: SourceListResponse): string {
+  if (response.items.length === 0) return 'No sources registered.';
+  const lines: string[] = [];
+  lines.push(`Sources (${response.items.length} of ${response.total}):`);
+  for (const s of response.items) {
+    lines.push('');
+    lines.push(`• ${s.display_name}  [${s.kind}]`);
+    lines.push(`    id:           ${s.id}`);
+    lines.push(`    identifier:   ${s.identifier}`);
+    lines.push(`    status:       ${s.status}${s.status_message ? ` (${s.status_message})` : ''}`);
+    lines.push(
+      `    last indexed: ${s.last_indexed_at ?? 'never'}    strategy: ${s.index_strategy}${s.cron_schedule ? ` (${s.cron_schedule})` : ''}`,
+    );
+  }
+  return lines.join('\n');
+}
+
+export function renderSourceStatus(status: SourceStatusDto): string {
+  const s = status.source;
+  const lines: string[] = [];
+  lines.push(`${s.display_name}  [${s.kind}]`);
+  lines.push(`  id:           ${s.id}`);
+  lines.push(`  identifier:   ${s.identifier}`);
+  lines.push(`  status:       ${s.status}${s.status_message ? ` (${s.status_message})` : ''}`);
+  lines.push(`  last indexed: ${s.last_indexed_at ?? 'never'}`);
+  lines.push(`  chunks:       ${status.chunk_count}`);
+  if (status.latest_job) {
+    lines.push(`  latest job:   ${status.latest_job.kind} (${status.latest_job.status})`);
+  }
+  return lines.join('\n');
+}
+
+export function renderMemoryList(response: MemoryListResponse, includeBody = false): string {
+  if (response.items.length === 0) return 'No memories found.';
+  const lines: string[] = [];
+  lines.push(`Memories (${response.items.length} of ${response.total}):`);
+  for (const m of response.items) {
+    lines.push('');
+    lines.push(`• ${m.title}  [${m.kind}]`);
+    lines.push(`    id:        ${m.id}`);
+    lines.push(`    created:   ${m.created_at}`);
+    if (m.expires_at) lines.push(`    expires:   ${m.expires_at}`);
+    if (m.tags && m.tags.length > 0) lines.push(`    tags:      ${m.tags.join(', ')}`);
+    if (m.directory) lines.push(`    directory: ${m.directory}`);
+    lines.push(`    summary:   ${m.summary}`);
+    if (includeBody && m.body) {
+      lines.push('');
+      lines.push(indent(m.body, 4));
+    }
+  }
+  return lines.join('\n');
+}
+
+export function renderMemory(memory: MemoryDto, includeBody = true): string {
+  return renderMemoryList({ items: [memory], total: 1, has_more: false }, includeBody);
+}
+
+export function renderSource(source: SourceDto): string {
+  return renderSources({ items: [source], total: 1, has_more: false });
+}
+
+function indent(text: string, spaces: number): string {
+  const pad = ' '.repeat(spaces);
+  return text
+    .split('\n')
+    .map((line) => `${pad}${line}`)
+    .join('\n');
+}

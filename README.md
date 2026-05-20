@@ -27,6 +27,9 @@ docker compose -f docker/docker-compose.yml up -d
 npx mnemis@latest  # wizard configures your agent in <1 min
 ```
 
+For the current development CLI and SDK usage, see
+[`docs/cli-sdk.md`](./docs/cli-sdk.md).
+
 ## Architecture
 
 Single Postgres for everything (pgvector + tsvector + relational + jobs via pg-boss). TypeScript everywhere (Bun + Node 22). MCP server, REST API, and CLI all backed by the same core packages.

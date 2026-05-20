@@ -1,0 +1,424 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it } from 'node:test';
+import type {
+  ChunkSearchResponse,
+  CreateMemoryInput,
+  CreateSourceInput,
+  JobDto,
+  MemoryDto,
+  MnemisClient,
+  SourceDto,
+  SourceListResponse,
+  SourceStatusDto,
+} from '@mnemis/sdk';
+import { dispatch } from '../src/commands.ts';
+import { readCredentials } from '../src/credentials.ts';
+import type { CliServices } from '../src/services.ts';
+
+function job(overrides: Partial<JobDto> = {}): JobDto {
+  return {
+    id: 'job-1',
+    kind: 'index_source',
+    status: 'queued',
+    payload: {},
+    progress: {},
+    result: null,
+    error: null,
+    attempts: 0,
+    scheduled_at: '2026-05-20T00:00:00.000Z',
+    started_at: null,
+    completed_at: null,
+    ...overrides,
+  };
+}
+
+function source(overrides: Partial<SourceDto> = {}): SourceDto {
+  return {
+    id: 'source-1',
+    kind: 'github_repo',
+    identifier: 'owner/repo',
+    display_name: 'owner/repo',
+    config: {},
+    last_indexed_at: null,
+    last_change_at: null,
+    index_strategy: 'webhook',
+    cron_schedule: null,
+    status: 'pending',
+    status_message: 'Index job queued',
+    created_at: '2026-05-20T00:00:00.000Z',
+    updated_at: '2026-05-20T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function memory(overrides: Partial<MemoryDto> = {}): MemoryDto {
+  return {
+    id: 'memory-1',
+    workspace_id: 'workspace-1',
+    kind: 'fact',
+    title: 'Important',
+    summary: 'Something useful',
+    body: 'Body',
+    tags: [],
+    directory: null,
+    file_overlap: [],
+    agent_origin: 'cli',
+    ttl_seconds: null,
+    expires_at: null,
+    archived_at: null,
+    source_ids: [],
+    derived_from: null,
+    confidence: null,
+    tool_calls: [],
+    model_version: null,
+    edited_files: [],
+    metadata: {},
+    created_at: '2026-05-20T00:00:00.000Z',
+    updated_at: '2026-05-20T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function services(client: Partial<MnemisClient>, env: NodeJS.ProcessEnv = {}): CliServices {
+  return {
+    env,
+    fetch,
+    async client() {
+      return client as MnemisClient;
+    },
+  };
+}
+
+async function capture<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; stdout: string; stderr: string }> {
+  const stdout = process.stdout;
+  const stderr = process.stderr;
+  const writeOut = stdout.write;
+  const writeErr = stderr.write;
+  const outChunks: string[] = [];
+  const errChunks: string[] = [];
+
+  stdout.write = ((chunk: unknown) => {
+    outChunks.push(String(chunk));
+    return true;
+  }) as typeof stdout.write;
+  stderr.write = ((chunk: unknown) => {
+    errChunks.push(String(chunk));
+    return true;
+  }) as typeof stderr.write;
+
+  try {
+    const result = await fn();
+    return { result, stdout: outChunks.join(''), stderr: errChunks.join('') };
+  } finally {
+    stdout.write = writeOut;
+    stderr.write = writeErr;
+  }
+}
+
+describe('auth commands', () => {
+  it('logs in, reports status and logs out using a credentials file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mnemis-cli-'));
+    const env = { MNEMIS_CREDENTIALS_FILE: join(dir, 'credentials.json') } as NodeJS.ProcessEnv;
+    try {
+      const svc = services({}, env);
+      const login = await capture(() =>
+        dispatch(
+          ['auth', 'login', '--url', 'http://localhost:8787', '--key', 'mn_test_1234567890abcdef'],
+          svc,
+        ),
+      );
+      assert.equal(login.result.exitCode, 0);
+
+      const raw = JSON.parse(await readFile(env.MNEMIS_CREDENTIALS_FILE!, 'utf8')) as {
+        api_url: string;
+        api_key: string;
+      };
+      assert.equal(raw.api_url, 'http://localhost:8787');
+      assert.equal(raw.api_key, 'mn_test_1234567890abcdef');
+
+      const status = await capture(() => dispatch(['auth', 'status'], svc));
+      assert.match(status.stdout, /api_url: http:\/\/localhost:8787/);
+      assert.match(status.stdout, /api_key: mn_test_.*cdef/);
+
+      const logout = await capture(() => dispatch(['auth', 'logout'], svc));
+      assert.equal(logout.result.exitCode, 0);
+      assert.equal(await readCredentials(env), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('source commands', () => {
+  it('registers GitHub repos with indexer config', async () => {
+    const inputs: CreateSourceInput[] = [];
+    const svc = services({
+      sources: {
+        async create(value: CreateSourceInput) {
+          inputs.push(value);
+          return { data: source(), job: job() };
+        },
+      } as MnemisClient['sources'],
+    });
+
+    const result = await capture(() =>
+      dispatch(
+        [
+          'repos',
+          'add',
+          'Owner/Repo',
+          '--branch',
+          'main',
+          '--installation',
+          '12345',
+          '--strategy',
+          'webhook',
+          '--include',
+          'apps/api',
+          '--exclude',
+          'node_modules',
+          '--max-file-bytes',
+          '1048576',
+          '--contextual-prefix',
+          'auto',
+        ],
+        svc,
+      ),
+    );
+
+    assert.equal(result.result.exitCode, 0);
+    const input = inputs[0];
+    assert.ok(input);
+    assert.equal(input.kind, 'github_repo');
+    assert.equal(input.identifier, 'Owner/Repo');
+    assert.deepEqual(input.config, {
+      branch: 'main',
+      githubInstallationId: '12345',
+      includePaths: ['apps/api'],
+      excludePaths: ['node_modules'],
+      maxFileBytes: 1048576,
+      chunkMaxChars: undefined,
+      contextualPrefixMode: 'auto',
+    });
+  });
+
+  it('registers docs sites with crawler config', async () => {
+    const inputs: CreateSourceInput[] = [];
+    const svc = services({
+      sources: {
+        async create(value: CreateSourceInput) {
+          inputs.push(value);
+          return {
+            data: source({ kind: 'docs_site', identifier: 'https://docs.example.com' }),
+            job: job(),
+          };
+        },
+      } as MnemisClient['sources'],
+    });
+
+    const result = await capture(() =>
+      dispatch(
+        [
+          'docs',
+          'add',
+          'https://docs.example.com',
+          '--include',
+          '/api',
+          '--exclude',
+          '/blog',
+          '--focus',
+          'API reference only',
+          '--max-pages',
+          '50',
+          '--no-robots',
+        ],
+        svc,
+      ),
+    );
+
+    assert.equal(result.result.exitCode, 0);
+    const input = inputs[0];
+    assert.ok(input);
+    assert.equal(input.kind, 'docs_site');
+    assert.deepEqual(input.config, {
+      includePaths: ['/api'],
+      excludePaths: ['/blog'],
+      focusInstructions: 'API reference only',
+      maxPages: 50,
+      respectRobots: false,
+      contextualPrefixMode: undefined,
+    });
+  });
+
+  it('lists status through the status alias', async () => {
+    const calls: unknown[] = [];
+    const svc = services({
+      sources: {
+        async list(query: unknown): Promise<SourceListResponse> {
+          calls.push(query);
+          return { items: [source({ status: 'indexed' })], total: 1, has_more: false };
+        },
+      } as MnemisClient['sources'],
+    });
+
+    const result = await capture(() =>
+      dispatch(['status', '--kind', 'github_repo', '--limit', '5'], svc),
+    );
+    assert.equal(result.result.exitCode, 0);
+    assert.deepEqual(calls[0], { kind: 'github_repo', status: undefined, limit: 5 });
+  });
+
+  it('renders source status by id', async () => {
+    const svc = services({
+      sources: {
+        async status(id: string): Promise<SourceStatusDto> {
+          assert.equal(id, 'source-1');
+          return { source: source({ status: 'indexed' }), chunk_count: 12, latest_job: job() };
+        },
+      } as MnemisClient['sources'],
+    });
+
+    const output = await capture(() => dispatch(['sources', 'status', 'source-1'], svc));
+    assert.match(output.stdout, /chunks:\s+12/);
+  });
+});
+
+describe('search and memory commands', () => {
+  it('searches sources and renders markdown responses', async () => {
+    const calls: unknown[] = [];
+    const response: ChunkSearchResponse = {
+      query: 'contextual retrieval',
+      mode: 'markdown',
+      retrieval: 'hybrid_rrf',
+      used_vector: true,
+      embedding_model: null,
+      embedding_tokens: 0,
+      items: [],
+      citations: [],
+      count: 0,
+      markdown: '# Results',
+    };
+    const svc = services({
+      async search(input: unknown) {
+        calls.push(input);
+        return response;
+      },
+    });
+
+    const output = await capture(() =>
+      dispatch(
+        [
+          'search',
+          'contextual',
+          'retrieval',
+          '--mode',
+          'markdown',
+          '--kind',
+          'docs_site',
+          '--limit',
+          '3',
+        ],
+        svc,
+      ),
+    );
+
+    assert.match(output.stdout, /# Results/);
+    assert.deepEqual(calls[0], {
+      query: 'contextual retrieval',
+      mode: 'markdown',
+      limit: 3,
+      sourceIds: undefined,
+      kinds: ['docs_site'],
+      pathPrefix: undefined,
+    });
+  });
+
+  it('saves memories with CLI origin and tags', async () => {
+    const inputs: CreateMemoryInput[] = [];
+    const svc = services({
+      memories: {
+        async create(value: CreateMemoryInput) {
+          inputs.push(value);
+          return memory({ id: 'memory-123', title: value.title });
+        },
+      } as MnemisClient['memories'],
+    });
+
+    const result = await capture(() =>
+      dispatch(
+        [
+          'memory',
+          'save',
+          '--kind',
+          'fact',
+          '--title',
+          'Important',
+          '--summary',
+          'A useful fact',
+          '--body',
+          'The body',
+          '--tag',
+          'phase-4',
+          '--ttl',
+          '0',
+        ],
+        svc,
+      ),
+    );
+
+    assert.equal(result.result.exitCode, 0);
+    const input = inputs[0];
+    assert.ok(input);
+    assert.equal(input.agentOrigin, 'cli');
+    assert.deepEqual(input.tags, ['phase-4']);
+    assert.equal(input.ttlSeconds, 0);
+  });
+
+  it('searches memories semantically by default and by keyword on --keyword', async () => {
+    const calls: string[] = [];
+    const svc = services({
+      memories: {
+        async search() {
+          calls.push('keyword');
+          return { items: [], total: 0, has_more: false };
+        },
+        async semanticSearch() {
+          calls.push('semantic');
+          return { items: [], total: 0, has_more: false };
+        },
+      } as unknown as MnemisClient['memories'],
+    });
+
+    const semantic = await capture(() => dispatch(['memory', 'search', 'query'], svc));
+    const keyword = await capture(() => dispatch(['memory', 'search', 'query', '--keyword'], svc));
+
+    assert.equal(semantic.result.exitCode, 0);
+    assert.equal(keyword.result.exitCode, 0);
+    assert.deepEqual(calls, ['semantic', 'keyword']);
+  });
+
+  it('fails before client creation on invalid numbers', async () => {
+    let clientCalls = 0;
+    const svc: CliServices = {
+      env: {},
+      fetch,
+      async client() {
+        clientCalls++;
+        return {} as MnemisClient;
+      },
+    };
+
+    const output = await capture(async () => {
+      const result = await dispatch(['search', 'query', '--limit', 'nope'], svc);
+      assert.equal(result.exitCode, 1);
+    });
+
+    assert.equal(clientCalls, 0);
+    assert.match(output.stderr, /--limit must be a positive integer/);
+  });
+});
