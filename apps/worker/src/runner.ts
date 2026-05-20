@@ -183,7 +183,8 @@ async function buildSourceIndex(
         'local_sources_disabled: config.localPath is only allowed when MNEMIS_ALLOW_LOCAL_SOURCES=true',
       );
     }
-    return buildLocalSourceIndex(config.localPath, config);
+    const index = await buildLocalSourceIndex(config.localPath, config);
+    return { ...index, commitSha: null as string | null };
   }
 
   if (source.kind === 'github_repo') {
@@ -199,14 +200,16 @@ async function buildSourceIndex(
       : undefined;
     const cloned = await cloneGitHubRepo(source.identifier, { branch, token });
     try {
-      return await buildLocalSourceIndex(cloned.path, config);
+      const index = await buildLocalSourceIndex(cloned.path, config);
+      return { ...index, commitSha: cloned.commitSha };
     } finally {
       await cloned.cleanup();
     }
   }
 
   if (source.kind === 'docs_site') {
-    return buildDocsSiteIndex(source.identifier, config);
+    const index = await buildDocsSiteIndex(source.identifier, config);
+    return { ...index, commitSha: null as string | null };
   }
 
   throw new Error(`Unsupported source kind: ${source.kind}`);
@@ -218,6 +221,7 @@ function chunkInsertValues(input: {
   runId: string;
   chunks: EmbeddedIndexChunk[];
   parentIdsByKey?: Map<string, string>;
+  commitSha?: string | null;
 }): (typeof chunks.$inferInsert)[] {
   return input.chunks.map((chunk) => ({
     workspaceId: input.workspaceId,
@@ -234,6 +238,7 @@ function chunkInsertValues(input: {
     metadata: {
       ...chunk.metadata,
       index_run_id: input.runId,
+      ...(input.commitSha ? { commit_sha: input.commitSha } : {}),
       ...(chunk.chunkKey ? { chunk_key: chunk.chunkKey } : {}),
       ...(chunk.parentKey ? { parent_key: chunk.parentKey } : {}),
       ...(chunk.embeddingModel
@@ -310,6 +315,7 @@ async function upsertChunks(input: {
   sourceId: string;
   runId: string;
   chunks: EmbeddedIndexChunk[];
+  commitSha?: string | null;
 }): Promise<{ upserted: number; deleted: number }> {
   const parentOrRootChunks = input.chunks.filter((chunk) => !chunk.parentKey);
   const childChunks = input.chunks.filter((chunk) => chunk.parentKey);
@@ -435,6 +441,7 @@ export async function processIndexJob(
       sourceId: source.id,
       runId,
       chunks: embedded.chunks,
+      commitSha: index.commitSha,
     });
 
     await db
@@ -450,6 +457,7 @@ export async function processIndexJob(
     await markJobCompleted(db, jobId, {
       files: index.files.length,
       chunks: index.chunks.length,
+      commit_sha: index.commitSha,
       chunks_contextualized: contextualized.stats.generated,
       contextual_prefix_model: contextualized.stats.model,
       contextual_prefix_mode: contextualized.stats.mode,

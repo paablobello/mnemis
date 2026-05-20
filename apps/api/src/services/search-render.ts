@@ -23,7 +23,9 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function gitRef(source: Source): string {
+function gitRef(source: Source, chunkMetadata: Record<string, unknown>): string {
+  const sha = typeof chunkMetadata.commit_sha === 'string' ? chunkMetadata.commit_sha : null;
+  if (sha && /^[0-9a-f]{7,64}$/i.test(sha)) return sha;
   const config = asRecord(source.config);
   const branch = typeof config.branch === 'string' ? config.branch : null;
   return branch && branch.length > 0 ? branch : 'HEAD';
@@ -32,7 +34,7 @@ function gitRef(source: Source): string {
 export function buildChunkPermalink(hit: ChunkSearchHit): string | null {
   const { source, chunk } = hit;
   if (source.kind === 'github_repo') {
-    const ref = gitRef(source);
+    const ref = gitRef(source, asRecord(chunk.metadata));
     const path = chunk.path.replace(/^\/+/, '');
     const fragment = `#L${chunk.lineStart}-L${chunk.lineEnd}`;
     return `https://github.com/${source.identifier}/blob/${encodeURIComponent(ref)}/${path}${fragment}`;

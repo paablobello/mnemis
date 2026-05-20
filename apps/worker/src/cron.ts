@@ -26,6 +26,52 @@ function addValue(target: Set<number>, value: number, label: string): void {
   target.add(label === 'day-of-week' && value === 7 ? 0 : value);
 }
 
+const CRON_SHORTCUTS: Record<string, string> = {
+  '@yearly': '0 0 1 1 *',
+  '@annually': '0 0 1 1 *',
+  '@monthly': '0 0 1 * *',
+  '@weekly': '0 0 * * 0',
+  '@daily': '0 0 * * *',
+  '@midnight': '0 0 * * *',
+  '@hourly': '0 * * * *',
+};
+
+const MONTH_NAMES: Record<string, number> = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  SEP: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12,
+};
+
+const DAY_OF_WEEK_NAMES: Record<string, number> = {
+  SUN: 0,
+  MON: 1,
+  TUE: 2,
+  WED: 3,
+  THU: 4,
+  FRI: 5,
+  SAT: 6,
+};
+
+function normalizeToken(token: string, label: string): string {
+  const upper = token.toUpperCase();
+  if (label === 'month' && upper in MONTH_NAMES) {
+    return String(MONTH_NAMES[upper]);
+  }
+  if (label === 'day-of-week' && upper in DAY_OF_WEEK_NAMES) {
+    return String(DAY_OF_WEEK_NAMES[upper]);
+  }
+  return token;
+}
+
 function expandField(field: string, min: number, max: number, label: string): Set<number> {
   const values = new Set<number>();
   for (const part of field.split(',')) {
@@ -45,11 +91,11 @@ function expandField(field: string, min: number, max: number, label: string): Se
     } else if (rangePart?.includes('-')) {
       const [rawStart, rawEnd] = rangePart.split('-');
       if (!rawStart || !rawEnd) throw new Error(`${label} range is malformed`);
-      start = parseNumber(rawStart, min, max, label);
-      end = parseNumber(rawEnd, min, max, label);
+      start = parseNumber(normalizeToken(rawStart, label), min, max, label);
+      end = parseNumber(normalizeToken(rawEnd, label), min, max, label);
       if (start > end) throw new Error(`${label} range start must be <= end`);
     } else if (rangePart) {
-      start = parseNumber(rangePart, min, max, label);
+      start = parseNumber(normalizeToken(rangePart, label), min, max, label);
       end = start;
     } else {
       throw new Error(`${label} segment is malformed`);
@@ -62,10 +108,18 @@ function expandField(field: string, min: number, max: number, label: string): Se
   return values;
 }
 
+function resolveShortcut(expression: string): string {
+  const trimmed = expression.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower in CRON_SHORTCUTS) return CRON_SHORTCUTS[lower]!;
+  return trimmed;
+}
+
 export function parseCronExpression(expression: string): CronSchedule {
-  const fields = expression.trim().split(/\s+/);
+  const resolved = resolveShortcut(expression);
+  const fields = resolved.split(/\s+/);
   if (fields.length !== 5) {
-    throw new Error('cronSchedule must be a standard 5-field cron expression');
+    throw new Error('cronSchedule must be a standard 5-field cron expression or a @shortcut');
   }
   return {
     minutes: expandField(fields[0]!, 0, 59, 'minute'),
@@ -132,11 +186,26 @@ async function latestIndexJobForSource(db: Database, sourceId: string) {
   return job ?? null;
 }
 
-export async function enqueueDueCronJobs(db: Database, now = new Date()): Promise<number> {
+export interface EnqueueDueCronJobsOptions {
+  workspaceId?: string;
+}
+
+export async function enqueueDueCronJobs(
+  db: Database,
+  now = new Date(),
+  options: EnqueueDueCronJobsOptions = {},
+): Promise<number> {
+  const whereClauses = [
+    eq(sources.indexStrategy, 'cron'),
+    sql`${sources.cronSchedule} IS NOT NULL`,
+  ];
+  if (options.workspaceId) {
+    whereClauses.push(eq(sources.workspaceId, options.workspaceId));
+  }
   const cronSources = await db
     .select()
     .from(sources)
-    .where(and(eq(sources.indexStrategy, 'cron'), sql`${sources.cronSchedule} IS NOT NULL`));
+    .where(and(...whereClauses));
 
   let queued = 0;
   for (const source of cronSources) {

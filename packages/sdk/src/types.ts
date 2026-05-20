@@ -12,9 +12,17 @@ export interface EditedFile {
   language?: string;
 }
 
+export interface MemoryLineage {
+  source_ids: string[];
+  derived_from: string | null;
+  confidence: number | null;
+  tool_calls: unknown;
+  model_version: string | null;
+  edited_files: unknown;
+}
+
 export interface MemoryDto {
   id: string;
-  workspace_id: string;
   kind: MemoryKind;
   title: string;
   summary: string;
@@ -22,19 +30,18 @@ export interface MemoryDto {
   tags: string[];
   directory: string | null;
   file_overlap: string[];
-  agent_origin: string | null;
   ttl_seconds: number | null;
   expires_at: string | null;
   archived_at: string | null;
-  source_ids: string[];
-  derived_from: string | null;
-  confidence: number | null;
-  tool_calls: unknown[];
-  model_version: string | null;
-  edited_files: EditedFile[];
-  metadata: Record<string, unknown>;
+  agent_origin: string | null;
   created_at: string;
   updated_at: string;
+  has_embedding: boolean;
+  /** Present only when the request asks for `?include=lineage`. */
+  lineage?: MemoryLineage;
+  /** Present only when the request asks for `?include=embedding`. */
+  embedding?: number[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface MemoryListResponse {

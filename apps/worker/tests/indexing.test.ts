@@ -148,6 +148,101 @@ describe('index worker', () => {
     );
   });
 
+  it('resolves @daily, @hourly and @weekly shortcuts', () => {
+    // @daily is 0 0 * * * → fires at 00:00 each day
+    assert.equal(
+      cronHasDueMinute(
+        '@daily',
+        new Date('2026-05-19T23:59:00.000Z'),
+        new Date('2026-05-20T00:00:30.000Z'),
+      ),
+      true,
+    );
+    assert.equal(
+      cronHasDueMinute(
+        '@daily',
+        new Date('2026-05-20T00:00:00.000Z'),
+        new Date('2026-05-20T11:00:00.000Z'),
+      ),
+      false,
+    );
+    // @hourly is 0 * * * *
+    assert.equal(
+      cronHasDueMinute(
+        '@hourly',
+        new Date('2026-05-20T10:30:00.000Z'),
+        new Date('2026-05-20T11:00:30.000Z'),
+      ),
+      true,
+    );
+    // @weekly is 0 0 * * 0 (Sunday). 2026-05-24 is a Sunday.
+    assert.equal(
+      cronHasDueMinute(
+        '@weekly',
+        new Date('2026-05-23T23:59:00.000Z'),
+        new Date('2026-05-24T00:00:30.000Z'),
+      ),
+      true,
+    );
+  });
+
+  it('accepts month and day-of-week names', () => {
+    // Mondays in May 2026 (UTC): 4, 11, 18, 25.
+    assert.equal(
+      cronHasDueMinute(
+        '0 9 * MAY MON',
+        new Date('2026-05-17T00:00:00.000Z'),
+        new Date('2026-05-18T09:01:00.000Z'),
+      ),
+      true,
+    );
+    // June 2026 Mondays should NOT match MAY
+    assert.equal(
+      cronHasDueMinute(
+        '0 9 * MAY MON',
+        new Date('2026-06-01T00:00:00.000Z'),
+        new Date('2026-06-01T09:01:00.000Z'),
+      ),
+      false,
+    );
+  });
+
+  it('applies the DOM/DOW OR rule when both restrict (cron tradition)', () => {
+    // "0 0 13 * FRI" → fires on the 13th OR on any Friday.
+    // 2026-05-15 is a Friday, not the 13th — should match.
+    assert.equal(
+      cronHasDueMinute(
+        '0 0 13 * FRI',
+        new Date('2026-05-14T23:59:00.000Z'),
+        new Date('2026-05-15T00:00:30.000Z'),
+      ),
+      true,
+    );
+    // 2026-05-13 is a Wednesday (not Friday) but is the 13th — should match.
+    assert.equal(
+      cronHasDueMinute(
+        '0 0 13 * FRI',
+        new Date('2026-05-12T23:59:00.000Z'),
+        new Date('2026-05-13T00:00:30.000Z'),
+      ),
+      true,
+    );
+    // 2026-05-14 (Thursday, not Friday, not the 13th) — must not match.
+    assert.equal(
+      cronHasDueMinute(
+        '0 0 13 * FRI',
+        new Date('2026-05-13T23:59:00.000Z'),
+        new Date('2026-05-14T00:01:00.000Z'),
+      ),
+      false,
+    );
+  });
+
+  it('rejects malformed cron expressions with a clear error', () => {
+    assert.throws(() => cronHasDueMinute('not a cron', new Date(), new Date()), /5-field/);
+    assert.throws(() => cronHasDueMinute('0 0 * * 9', new Date(), new Date()), /day-of-week/);
+  });
+
   it('queues due cron reindex jobs without duplicating open jobs', async () => {
     const anchor = new Date('2026-05-20T10:00:00.000Z');
     const now = new Date('2026-05-20T10:15:30.000Z');
@@ -167,8 +262,8 @@ describe('index worker', () => {
       })
       .returning();
 
-    assert.equal(await enqueueDueCronJobs(db, now), 1);
-    assert.equal(await enqueueDueCronJobs(db, now), 0);
+    assert.equal(await enqueueDueCronJobs(db, now, { workspaceId }), 1);
+    assert.equal(await enqueueDueCronJobs(db, now, { workspaceId }), 0);
 
     const rows = await db
       .select()

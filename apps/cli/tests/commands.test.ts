@@ -60,7 +60,6 @@ function source(overrides: Partial<SourceDto> = {}): SourceDto {
 function memory(overrides: Partial<MemoryDto> = {}): MemoryDto {
   return {
     id: 'memory-1',
-    workspace_id: 'workspace-1',
     kind: 'fact',
     title: 'Important',
     summary: 'Something useful',
@@ -72,12 +71,7 @@ function memory(overrides: Partial<MemoryDto> = {}): MemoryDto {
     ttl_seconds: null,
     expires_at: null,
     archived_at: null,
-    source_ids: [],
-    derived_from: null,
-    confidence: null,
-    tool_calls: [],
-    model_version: null,
-    edited_files: [],
+    has_embedding: false,
     metadata: {},
     created_at: '2026-05-20T00:00:00.000Z',
     updated_at: '2026-05-20T00:00:00.000Z',

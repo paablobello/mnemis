@@ -557,6 +557,49 @@ describe('source chunk search', () => {
     );
   });
 
+  it('prefers commit_sha in chunk metadata over branch for github permalinks', async () => {
+    const sha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9001122334';
+    const [shaSource] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'github_repo',
+        identifier: 'mnemis-test/sha-repo',
+        displayName: 'SHA repo',
+        config: { branch: 'main' },
+        status: 'indexed',
+        lastIndexedAt: new Date('2026-05-20T10:00:00.000Z'),
+      })
+      .returning({ id: sources.id });
+    await db.insert(chunks).values({
+      workspaceId,
+      sourceId: shaSource!.id,
+      path: 'lib/handler.ts',
+      lineStart: 10,
+      lineEnd: 20,
+      rawText: 'export function shaHandler() { /* pinned to a commit */ }',
+      language: 'typescript',
+      metadata: { commit_sha: sha },
+    });
+
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        query: 'shaHandler',
+        sourceIds: [shaSource!.id],
+        limit: 1,
+        mode: 'markdown',
+      }),
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(
+      json.items[0].permalink,
+      `https://github.com/mnemis-test/sha-repo/blob/${sha}/lib/handler.ts#L10-L20`,
+    );
+  });
+
   it('returns 424 synthesis_unavailable when ANTHROPIC_API_KEY is missing', async () => {
     const original = process.env.ANTHROPIC_API_KEY;
     Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY');

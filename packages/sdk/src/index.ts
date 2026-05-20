@@ -16,6 +16,7 @@ export type {
   ListSourcesQuery,
   MemoryDto,
   MemoryKind,
+  MemoryLineage,
   MemoryListResponse,
   MemorySearchHit,
   MemorySearchInput,

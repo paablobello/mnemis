@@ -101,7 +101,7 @@ describe('memories resource', () => {
     assert.equal(calls[1]!.url, `${BASE}/v1/memories/semantic-search`);
   });
 
-  it('get supports include=lineage as query param', async () => {
+  it('get supports include=lineage and exposes lineage on the DTO', async () => {
     const { client: c, calls } = client(() =>
       ok({
         data: {
@@ -117,21 +117,55 @@ describe('memories resource', () => {
           ttl_seconds: null,
           expires_at: null,
           archived_at: null,
-          source_ids: [],
-          derived_from: null,
-          confidence: null,
-          tool_calls: [],
-          model_version: null,
-          edited_files: [],
+          has_embedding: true,
+          lineage: {
+            source_ids: ['src-1'],
+            derived_from: null,
+            confidence: 0.91,
+            tool_calls: [{ tool: 'codex_save' }],
+            model_version: 'claude-sonnet-4-5',
+            edited_files: [],
+          },
           metadata: {},
-          workspace_id: 'ws',
           created_at: '2026-05-20T00:00:00.000Z',
           updated_at: '2026-05-20T00:00:00.000Z',
         },
       }),
     );
-    await c.memories.get('abc', { include: 'lineage' });
+    const memory = await c.memories.get('abc', { include: 'lineage' });
     assert.equal(calls[0]!.url, `${BASE}/v1/memories/abc?include=lineage`);
+    assert.equal(memory.lineage?.confidence, 0.91);
+    assert.deepEqual(memory.lineage?.source_ids, ['src-1']);
+    assert.equal(memory.has_embedding, true);
+  });
+
+  it('omits optional fields when API returns the minimal DTO', async () => {
+    const { client: c } = client(() =>
+      ok({
+        data: {
+          id: 'm',
+          kind: 'working',
+          title: 't',
+          summary: 's',
+          body: 'b',
+          tags: [],
+          directory: null,
+          file_overlap: [],
+          agent_origin: null,
+          ttl_seconds: null,
+          expires_at: null,
+          archived_at: null,
+          has_embedding: false,
+          metadata: {},
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+        },
+      }),
+    );
+    const memory = await c.memories.get('abc');
+    assert.equal(memory.lineage, undefined);
+    assert.equal(memory.embedding, undefined);
+    assert.equal(memory.has_embedding, false);
   });
 
   it('list maps friendly query keys to API query params', async () => {

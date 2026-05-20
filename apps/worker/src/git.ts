@@ -3,21 +3,25 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-function runGit(args: string[], options: SpawnOptionsWithoutStdio = {}): Promise<void> {
+function runGit(args: string[], options: SpawnOptionsWithoutStdio = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
       ...options,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    let stdout = '';
     let stderr = '';
+    child.stdout.on('data', (data) => {
+      stdout += String(data);
+    });
     child.stderr.on('data', (data) => {
       stderr += String(data);
     });
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
-        resolve();
+        resolve(stdout);
         return;
       }
       reject(new Error(`git ${args[0]} failed with code ${code}: ${stderr.slice(0, 1_000)}`));
@@ -27,6 +31,7 @@ function runGit(args: string[], options: SpawnOptionsWithoutStdio = {}): Promise
 
 export interface ClonedRepo {
   path: string;
+  commitSha: string | null;
   cleanup: () => Promise<void>;
 }
 
@@ -63,8 +68,18 @@ export async function cloneGitHubRepo(
     throw err;
   }
 
+  let commitSha: string | null = null;
+  try {
+    const stdout = await runGit(['rev-parse', 'HEAD'], { cwd: dir });
+    const trimmed = stdout.trim();
+    commitSha = /^[0-9a-f]{40}$/i.test(trimmed) ? trimmed : null;
+  } catch {
+    // rev-parse failures are not fatal; permalinks fall back to branch.
+  }
+
   return {
     path: dir,
+    commitSha,
     cleanup: () => rm(dir, { recursive: true, force: true }),
   };
 }
