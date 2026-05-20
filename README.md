@@ -4,7 +4,10 @@
 
 Mnemis gives AI coding agents (Cursor, Claude Code, Codex, etc.) **persistent memory** and **fresh, cited retrieval over your repos and docs** — through a single MCP server, REST API, and CLI.
 
-**Status**: pre-alpha, usable for local development and integration testing. The API, worker, MCP server, TypeScript SDK, and CLI are present; hosted cloud UX and several retrieval-quality roadmap items are still in progress.
+**Status**: alpha (v0.1.0). The API, worker, MCP server, TypeScript SDK and CLI are
+all present and exercised by 148 tests. Local Bun development, production
+docker-compose and `mnemis init` for Cursor/Claude Code/Windsurf/Zed are
+shipped. Hosted cloud UX is the next milestone.
 
 ## What it is
 
@@ -12,7 +15,7 @@ Mnemis combines:
 
 1. **Memory** — agents save plans, decisions, and conversation state with typed TTLs (working / session / fact / procedural). Other agents pick up where they left off.
 2. **Indexing** — GitHub repos and docs sites through the worker, with include/exclude filters, docs crawling, and optional contextual prefixes.
-3. **Retrieval** — keyword or hybrid vector + Postgres full-text retrieval with RRF-style fusion, optional Voyage reranking, and cited raw, markdown, or synthesized responses.
+3. **Retrieval** — keyword or hybrid vector + Postgres full-text retrieval with RRF-style fusion, optional Voyage or local BGE reranking, and cited raw, markdown or synthesized responses. GitHub permalinks pin to the indexed commit SHA.
 4. **MCP first** — works with Cursor, Claude Code, Codex, Windsurf, Zed out of the box.
 
 ## Quick start

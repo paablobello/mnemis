@@ -60,7 +60,10 @@ Tools registered today:
 
 Run the MCP server after setting `MNEMIS_API_URL` and `MNEMIS_API_KEY`.
 
-To wire it into Claude Code, add to `~/.config/claude-code/mcp.json` (or the equivalent for your client):
+The fastest way to wire it into Claude Code, Cursor, Windsurf and Zed at
+once is `bun run cli init` — it patches the relevant config file with a
+backup. If you prefer manual setup, add to `~/.config/claude-code/mcp.json`
+(or the equivalent for your client):
 
 ```json
 {
@@ -93,6 +96,34 @@ packages/
 docker/       — Docker compose + Dockerfiles
 docs/         — Architecture, API reference, research
 ```
+
+## Running the retrieval benchmark
+
+`@mnemis/eval` ships a small curated dataset that questions the Mnemis
+repo itself. With API + worker running and `MNEMIS_API_URL` /
+`MNEMIS_API_KEY` set:
+
+```bash
+bun run benchmark
+```
+
+The script registers a one-off local source, waits for indexing, and
+prints nDCG@10, MRR@10 and Recall@5 per retrieval variant. Set
+`MNEMIS_RERANK_PROVIDER=voyage` or `=local` on the API process to evaluate
+reranking. Extend `packages/eval/data/mnemis-self/queries.json` with new
+queries and qrels before reporting public quality numbers.
+
+## Releasing
+
+1. Bump versions in `apps/cli/package.json`, `apps/mcp/package.json` and
+   `packages/sdk/package.json` (keep them in sync).
+2. Update `CHANGELOG.md`.
+3. `bun run typecheck && bun run lint && bun run test --force` from the
+   repo root — must be 10/10 green to avoid the cron flake regression.
+4. `bun --filter @mnemis/sdk build && bun --filter @mnemis/cli build &&
+   bun --filter @mnemis/mcp build` to materialize `dist/`.
+5. Publish in dependency order: SDK first, then CLI and MCP.
+6. Tag the commit (`git tag v0.1.x && git push --tags`).
 
 ## Commit convention
 
