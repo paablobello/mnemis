@@ -1,5 +1,12 @@
+import type {
+  ChunkSearchResponse,
+  MemoryDto,
+  MemoryListResponse,
+  MnemisClient,
+  SourceDto,
+  SourceListResponse,
+} from '@mnemis/sdk';
 import { z } from 'zod';
-import type { MnemisClient } from './client.ts';
 
 export interface ToolContext {
   client: MnemisClient;
@@ -9,69 +16,6 @@ export type ToolResult = {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
 };
-
-interface SourceSearchItem {
-  source_identifier: string;
-  source_display_name: string;
-  path: string;
-  line_start: number;
-  line_end: number;
-  permalink: string | null;
-  last_indexed_at: string | null;
-  citation_number: number;
-  raw_text?: string;
-}
-
-interface SourceSearchResponse {
-  mode: 'raw' | 'markdown' | 'synthesized';
-  query: string;
-  retrieval: string;
-  used_vector: boolean;
-  count: number;
-  items: SourceSearchItem[];
-  markdown?: string;
-  answer?: string;
-  synthesis_model?: string;
-}
-
-interface MemoryDto {
-  id: string;
-  kind: string;
-  title: string;
-  summary: string;
-  body?: string;
-  tags?: string[];
-  directory?: string | null;
-  created_at: string;
-  expires_at?: string | null;
-  source_ids?: string[];
-  confidence?: number | null;
-  agent_origin?: string | null;
-}
-
-interface MemoryListResponse {
-  items: MemoryDto[];
-  total: number;
-  has_more: boolean;
-}
-
-interface SourceDto {
-  id: string;
-  kind: string;
-  identifier: string;
-  display_name: string;
-  status: string;
-  status_message: string | null;
-  last_indexed_at: string | null;
-  cron_schedule: string | null;
-  index_strategy: string;
-}
-
-interface SourceListResponse {
-  items: SourceDto[];
-  total: number;
-  has_more: boolean;
-}
 
 function text(value: string): ToolResult {
   return { content: [{ type: 'text', text: value }] };
@@ -129,6 +73,18 @@ function renderSourceList(response: SourceListResponse): string {
   return lines.join('\n').trimEnd();
 }
 
+function renderSearchResponse(response: ChunkSearchResponse): ToolResult {
+  if (response.mode === 'markdown' && response.markdown) {
+    return text(response.markdown);
+  }
+  if (response.mode === 'synthesized' && response.answer) {
+    return text(
+      `${response.answer}\n\n_model: ${response.synthesis_model ?? 'unknown'} · retrieval: ${response.retrieval}_`,
+    );
+  }
+  return jsonText(response);
+}
+
 /* -------------------------------------------------------------------------- */
 /*  source_search                                                              */
 /* -------------------------------------------------------------------------- */
@@ -168,11 +124,11 @@ export async function sourceSearch(
     mode: 'markdown' | 'raw' | 'synthesized';
     limit?: number;
     sourceIds?: string[];
-    kinds?: string[];
+    kinds?: Array<'github_repo' | 'docs_site'>;
     pathPrefix?: string;
   },
 ): Promise<ToolResult> {
-  const response = await ctx.client.request<SourceSearchResponse>('POST', '/v1/search', {
+  const response = await ctx.client.search({
     query: input.query,
     mode: input.mode,
     limit: input.limit,
@@ -180,16 +136,7 @@ export async function sourceSearch(
     kinds: input.kinds,
     pathPrefix: input.pathPrefix,
   });
-
-  if (response.mode === 'markdown' && response.markdown) {
-    return text(response.markdown);
-  }
-  if (response.mode === 'synthesized' && response.answer) {
-    return text(
-      `${response.answer}\n\n_model: ${response.synthesis_model ?? 'unknown'} · retrieval: ${response.retrieval}_`,
-    );
-  }
-  return jsonText(response);
+  return renderSearchResponse(response);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -226,14 +173,11 @@ export async function sourceIndex(
     indexStrategy?: 'manual' | 'webhook' | 'cron';
   },
 ): Promise<ToolResult> {
-  const config: Record<string, unknown> = {};
+  const config: { branch?: string; githubInstallationId?: string } = {};
   if (input.branch) config.branch = input.branch;
   if (input.githubInstallationId) config.githubInstallationId = input.githubInstallationId;
 
-  const response = await ctx.client.request<{
-    data: SourceDto;
-    job: { id: string; kind: string; status: string } | null;
-  }>('POST', '/v1/sources', {
+  const response = await ctx.client.sources.create({
     kind: input.kind,
     identifier: input.identifier,
     displayName: input.displayName,
@@ -275,15 +219,14 @@ export const sourceListInput = {
 
 export async function sourceList(
   ctx: ToolContext,
-  input: { kind?: string; status?: string; q?: string; limit?: number },
+  input: {
+    kind?: 'github_repo' | 'docs_site';
+    status?: 'pending' | 'indexing' | 'indexed' | 'failed';
+    q?: string;
+    limit?: number;
+  },
 ): Promise<ToolResult> {
-  const params = new URLSearchParams();
-  if (input.kind) params.set('kind', input.kind);
-  if (input.status) params.set('status', input.status);
-  if (input.q) params.set('q', input.q);
-  if (input.limit !== undefined) params.set('limit', String(input.limit));
-  const path = `/v1/sources${params.size > 0 ? `?${params.toString()}` : ''}`;
-  const response = await ctx.client.request<SourceListResponse>('GET', path);
+  const response = await ctx.client.sources.list(input);
   return text(renderSourceList(response));
 }
 
@@ -317,8 +260,7 @@ export async function memorySave(
     sourceIds?: string[];
   },
 ): Promise<ToolResult> {
-  const response = await ctx.client.request<{ data: MemoryDto }>('POST', '/v1/memories', input);
-  const m = response.data;
+  const m: MemoryDto = await ctx.client.memories.create(input);
   return text(
     `Saved memory \`${m.id}\` (kind: ${m.kind})\n` +
       `expires: ${m.expires_at ?? 'never'}\n\n` +
@@ -354,22 +296,21 @@ export async function memorySearch(
   ctx: ToolContext,
   input: {
     query: string;
-    kind?: string;
+    kind?: 'working' | 'session' | 'fact' | 'procedural';
     tags?: string[];
     directory?: string;
     limit?: number;
     semantic: boolean;
   },
 ): Promise<ToolResult> {
-  const path = input.semantic ? '/v1/memories/semantic-search' : '/v1/memories/search';
-  const body = {
+  const fn = input.semantic ? ctx.client.memories.semanticSearch : ctx.client.memories.search;
+  const response = await fn.call(ctx.client.memories, {
     query: input.query,
     kind: input.kind,
     tags: input.tags,
     directory: input.directory,
     limit: input.limit,
-  };
-  const response = await ctx.client.request<MemoryListResponse>('POST', path, body);
+  });
   return text(renderMemoryList(response, false));
 }
 
@@ -390,10 +331,9 @@ export async function memoryRetrieve(
   ctx: ToolContext,
   input: { id: string; includeLineage: boolean },
 ): Promise<ToolResult> {
-  const params = input.includeLineage ? '?include=lineage' : '';
-  const response = await ctx.client.request<{ data: MemoryDto }>(
-    'GET',
-    `/v1/memories/${input.id}${params}`,
+  const m = await ctx.client.memories.get(
+    input.id,
+    input.includeLineage ? { include: 'lineage' } : undefined,
   );
-  return text(renderMemoryList({ items: [response.data], total: 1, has_more: false }, true));
+  return text(renderMemoryList({ items: [m], total: 1, has_more: false }, true));
 }

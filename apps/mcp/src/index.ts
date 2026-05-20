@@ -1,7 +1,7 @@
 #!/usr/bin/env node
+import { createMnemisClient } from '@mnemis/sdk';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createMnemisClient } from './client.ts';
 import { loadConfig } from './config.ts';
 import {
   type ToolContext,
@@ -20,7 +20,10 @@ import {
 } from './tools.ts';
 
 const config = loadConfig();
-const client = createMnemisClient(config);
+const client = createMnemisClient({
+  apiUrl: config.MNEMIS_API_URL,
+  apiKey: config.MNEMIS_API_KEY,
+});
 const ctx: ToolContext = { client };
 
 const server = new McpServer({ name: 'mnemis', version: '0.0.0' }, { capabilities: { tools: {} } });

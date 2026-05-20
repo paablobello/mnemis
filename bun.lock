@@ -34,6 +34,7 @@
         "mnemis-mcp": "src/index.ts",
       },
       "dependencies": {
+        "@mnemis/sdk": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.0.4",
         "zod": "^3.23.8",
       },
@@ -88,6 +89,14 @@
     },
     "packages/indexer": {
       "name": "@mnemis/indexer",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^22.9.0",
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/sdk": {
+      "name": "@mnemis/sdk",
       "version": "0.0.0",
       "devDependencies": {
         "@types/node": "^22.9.0",
@@ -179,6 +188,8 @@
     "@mnemis/indexer": ["@mnemis/indexer@workspace:packages/indexer"],
 
     "@mnemis/mcp": ["@mnemis/mcp@workspace:apps/mcp"],
+
+    "@mnemis/sdk": ["@mnemis/sdk@workspace:packages/sdk"],
 
     "@mnemis/worker": ["@mnemis/worker@workspace:apps/worker"],
 
