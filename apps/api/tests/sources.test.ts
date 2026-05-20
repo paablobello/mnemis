@@ -816,7 +816,7 @@ describe('source chunk search', () => {
     const json = await res.json();
     assert.equal(json.retrieval, 'hybrid_rrf');
     assert.equal(json.used_vector, true);
-    assert.equal(json.embedding_model, 'voyage-3.5-large');
+    assert.equal(json.embedding_model, 'voyage-3-large');
     assert.equal(json.embedding_tokens, 1);
     assert.equal(json.items[0].path, 'docs/auth.md');
     assert.equal(json.items[0].ranks.bm25, null);

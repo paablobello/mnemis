@@ -698,7 +698,7 @@ describe('index worker', () => {
     assert.deepEqual(
       (updatedJob!.result as { embedding_model_counts: Record<string, number> })
         .embedding_model_counts,
-      { 'voyage-code-3': 1, 'voyage-3.5-large': 1 },
+      { 'voyage-code-3': 1, 'voyage-3-large': 1 },
     );
 
     const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
@@ -708,7 +708,7 @@ describe('index worker', () => {
       indexedChunks.every(
         (chunk) =>
           (chunk.metadata as { embedding_model?: string }).embedding_model === 'voyage-code-3' ||
-          (chunk.metadata as { embedding_model?: string }).embedding_model === 'voyage-3.5-large',
+          (chunk.metadata as { embedding_model?: string }).embedding_model === 'voyage-3-large',
       ),
     );
 

@@ -90,7 +90,7 @@ export function toDto(m: Memory, opts: ProjectionOpts = {}): MemoryDto {
  *  Embedding helper
  *
  *  We embed the *concatenated* projection (title + summary + body) with
- *  voyage-3.5-large + input_type='document'. This matches what we will embed
+ *  voyage-3-large + input_type='document'. This matches what we will embed
  *  at search time with input_type='query', so cosine distance is meaningful.
  * --------------------------------------------------------------------------*/
 function embedSourceFor(input: { title: string; summary: string; body: string }): string {

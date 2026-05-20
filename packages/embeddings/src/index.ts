@@ -7,7 +7,7 @@ const MAX_BATCH = 128;
 const CACHE_LIMIT = 2_000;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 
-export type VoyageModel = 'voyage-3.5-large' | 'voyage-code-3';
+export type VoyageModel = 'voyage-3-large' | 'voyage-code-3';
 export type VoyageRerankModel = 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
 export type VoyageInputType = 'document' | 'query';
 
@@ -46,7 +46,7 @@ export class EmbeddingsClient {
   private readonly apiKey: string;
   private readonly cache = new Map<string, number[]>();
 
-  constructor(apiKey: string, defaultModel: VoyageModel = 'voyage-3.5-large') {
+  constructor(apiKey: string, defaultModel: VoyageModel = 'voyage-3-large') {
     this.apiKey = apiKey;
     this.defaultModel = defaultModel;
   }
@@ -238,7 +238,7 @@ export class VoyageRerankerClient {
 
 let singleton: EmbeddingsClient | null = null;
 let singletonKey: string | null = null;
-let singletonDefaultModel: VoyageModel = 'voyage-3.5-large';
+let singletonDefaultModel: VoyageModel = 'voyage-3-large';
 let rerankerSingleton: VoyageRerankerClient | null = null;
 let rerankerKey: string | null = null;
 let rerankerDefaultModel: VoyageRerankModel = 'rerank-2.5';
@@ -247,7 +247,7 @@ export function getEmbeddings(
   opts: { apiKey?: string; defaultModel?: VoyageModel } = {},
 ): EmbeddingsClient | null {
   const key = opts.apiKey ?? process.env.VOYAGE_API_KEY?.trim();
-  const defaultModel = opts.defaultModel ?? 'voyage-3.5-large';
+  const defaultModel = opts.defaultModel ?? 'voyage-3-large';
 
   if (!key) {
     singleton = null;
@@ -268,7 +268,7 @@ export function getEmbeddings(
 export function resetEmbeddingsForTests(): void {
   singleton = null;
   singletonKey = null;
-  singletonDefaultModel = 'voyage-3.5-large';
+  singletonDefaultModel = 'voyage-3-large';
   rerankerSingleton = null;
   rerankerKey = null;
   rerankerDefaultModel = 'rerank-2.5';

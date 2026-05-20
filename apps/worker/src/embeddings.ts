@@ -33,9 +33,7 @@ export interface ChunkEmbeddingStats {
 }
 
 function modelForChunk(chunk: IndexChunk): VoyageModel {
-  return chunk.language && CODE_LANGUAGES.has(chunk.language)
-    ? 'voyage-code-3'
-    : 'voyage-3.5-large';
+  return chunk.language && CODE_LANGUAGES.has(chunk.language) ? 'voyage-code-3' : 'voyage-3-large';
 }
 
 function embedTextForChunk(chunk: IndexChunk): string {
