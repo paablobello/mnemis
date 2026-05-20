@@ -46,14 +46,14 @@ const benchmarkMemories = [
     id: 'rrf_fusion',
     title: 'Reciprocal Rank Fusion',
     summary: 'RRF combines lexical and vector rankings.',
-    body: 'Hybrid search retrieves top candidates from BM25 and vector search, then combines their ranks with Reciprocal Rank Fusion using k equals 60.',
+    body: 'Hybrid search retrieves top candidates from Postgres full-text and vector search, then combines their ranks with Reciprocal Rank Fusion using k equals 60.',
     tags: ['quality', 'retrieval'],
   },
   {
-    id: 'mxbai_reranker',
-    title: 'mxbai reranker',
-    summary: 'The chosen reranker is mxbai-rerank-large-v2.',
-    body: 'After RRF fusion, Mnemis should rerank the top 50 candidates with mxbai-rerank-large-v2 and return the top 10 results.',
+    id: 'voyage_reranker',
+    title: 'Voyage reranker',
+    summary: 'Optional cloud reranking uses Voyage rerank.',
+    body: 'When MNEMIS_RERANK_PROVIDER is voyage, Mnemis reranks the post-fusion candidate pool with Voyage rerank and returns reranker metadata.',
     tags: ['quality', 'reranker'],
   },
   {
@@ -74,21 +74,21 @@ const benchmarkMemories = [
     id: 'contextual_retrieval',
     title: 'Anthropic Contextual Retrieval',
     summary: 'Contextual prefixes improve docs retrieval.',
-    body: 'Documentation chunks get a short contextual prefix generated from the whole document before embedding and BM25 indexing.',
+    body: 'Documentation chunks can get a short contextual prefix generated from the whole document before embedding and Postgres full-text indexing.',
     tags: ['quality', 'chunking'],
   },
   {
-    id: 'tree_sitter_chunking',
-    title: 'tree-sitter AST chunking',
+    id: 'ast_chunking',
+    title: 'AST chunking',
     summary: 'Code chunks follow syntax boundaries.',
-    body: 'Repository indexing uses tree-sitter to split TypeScript, Python, Go, Rust, and Java code into functions, classes, and parent-child chunks.',
+    body: 'Repository indexing uses TypeScript AST parsing for JavaScript and TypeScript symbols, Python indentation parsing, and parent-child chunks for large symbols.',
     tags: ['quality', 'chunking'],
   },
   {
     id: 'firecrawl_docs',
     title: 'Firecrawl docs crawler',
     summary: 'Docs sites are crawled into clean Markdown.',
-    body: 'Mnemis uses Firecrawl for documentation sites, respecting robots and llms text, then converts HTML pages into clean Markdown chunks.',
+    body: 'Mnemis can use Firecrawl for documentation sites when configured, and otherwise falls back to the native same-origin crawler.',
     tags: ['quality', 'docs'],
   },
   {
@@ -110,7 +110,7 @@ const benchmarkMemories = [
 const benchmarkCases: RetrievalCase[] = [
   {
     id: 'q_rrf',
-    query: 'combine BM25 and vector rankings with reciprocal rank fusion',
+    query: 'combine full text and vector rankings with reciprocal rank fusion',
     relevant: { rrf_fusion: 3, pgvector_hnsw: 1 },
   },
   {
@@ -121,12 +121,12 @@ const benchmarkCases: RetrievalCase[] = [
   {
     id: 'q_reranker',
     query: 'which reranker runs after RRF fusion top 50',
-    relevant: { mxbai_reranker: 3, rrf_fusion: 1 },
+    relevant: { voyage_reranker: 3, rrf_fusion: 1 },
   },
   {
     id: 'q_code_chunking',
     query: 'split code into functions classes parent child chunks using syntax tree',
-    relevant: { tree_sitter_chunking: 3, contextual_retrieval: 1 },
+    relevant: { ast_chunking: 3, contextual_retrieval: 1 },
   },
   {
     id: 'q_docs_crawler',

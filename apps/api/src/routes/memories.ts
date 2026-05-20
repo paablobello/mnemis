@@ -86,6 +86,9 @@ memoriesRoutes.post('/semantic-search', requireScopes('search:read'), async (c) 
     mode: result.used_vector ? 'hybrid_rrf' : 'keyword_only',
     embedding_model: result.embedding_model,
     embedding_tokens: result.embedding_tokens,
+    reranked: result.reranked,
+    reranker_model: result.reranker_model,
+    reranker_tokens: result.reranker_tokens,
     items: result.hits.map((h) => serializeHit(h, include)),
     count: result.hits.length,
   });

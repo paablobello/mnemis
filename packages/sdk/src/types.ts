@@ -79,6 +79,28 @@ export interface MemorySearchInput {
   include?: Array<'lineage' | 'embedding'>;
 }
 
+export type MemorySearchMode = 'keyword' | 'keyword_only' | 'hybrid_rrf';
+
+export interface MemorySearchHit {
+  score: number;
+  ranks: { bm25: number | null; vector: number | null };
+  bm25_score: number | null;
+  vector_score: number | null;
+  memory: MemoryDto;
+}
+
+export interface MemorySearchResponse {
+  query: string;
+  mode: MemorySearchMode;
+  embedding_model?: string | null;
+  embedding_tokens?: number;
+  reranked?: boolean;
+  reranker_model?: string | null;
+  reranker_tokens?: number;
+  items: MemorySearchHit[];
+  count: number;
+}
+
 export interface ListMemoriesQuery {
   kind?: MemoryKind;
   tag?: string;
@@ -154,6 +176,7 @@ export interface CreateSourceInput {
     contextualPrefixMaxChunkChars?: number;
     maxPages?: number;
     respectRobots?: boolean;
+    docsCrawler?: 'auto' | 'native' | 'firecrawl';
   };
   indexStrategy?: IndexStrategy;
   cronSchedule?: string | null;
@@ -230,6 +253,9 @@ export interface ChunkSearchResponse {
   used_vector: boolean;
   embedding_model: string | null;
   embedding_tokens: number;
+  reranked: boolean;
+  reranker_model: string | null;
+  reranker_tokens: number;
   items: ChunkSearchItem[];
   citations: ChunkSearchCitation[];
   count: number;

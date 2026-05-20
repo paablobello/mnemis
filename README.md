@@ -12,7 +12,7 @@ Mnemis combines:
 
 1. **Memory** — agents save plans, decisions, and conversation state with typed TTLs (working / session / fact / procedural). Other agents pick up where they left off.
 2. **Indexing** — GitHub repos and docs sites through the worker, with include/exclude filters, docs crawling, and optional contextual prefixes.
-3. **Retrieval** — keyword or hybrid vector + BM25 retrieval with RRF-style fusion and cited raw, markdown, or synthesized responses.
+3. **Retrieval** — keyword or hybrid vector + Postgres full-text retrieval with RRF-style fusion, optional Voyage reranking, and cited raw, markdown, or synthesized responses.
 4. **MCP first** — works with Cursor, Claude Code, Codex, Windsurf, Zed out of the box.
 
 ## Quick start
@@ -45,7 +45,7 @@ For full CLI and SDK usage, see [`docs/cli-sdk.md`](./docs/cli-sdk.md).
 
 ## Architecture
 
-Single Postgres for everything (pgvector + tsvector + relational data + jobs table). TypeScript everywhere (Bun + Node 22). MCP server, REST API, CLI, and integrations share the same TypeScript SDK.
+Single Postgres for everything (pgvector + tsvector + relational data + jobs table). TypeScript everywhere (Bun + Node 22). MCP server, REST API, CLI, and integrations share the same TypeScript SDK. Docs can use the native crawler or Firecrawl when `FIRECRAWL_API_KEY` is configured.
 
 See `docs/research/tech-decisions.md` for full architectural rationale.
 

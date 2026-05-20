@@ -42,6 +42,7 @@ export const sourceConfigSchema = z
     contextualPrefixMaxChunkChars: z.number().int().min(500).max(30_000).optional(),
     maxPages: z.number().int().positive().max(50_000).optional(),
     respectRobots: z.boolean().optional(),
+    docsCrawler: z.enum(['auto', 'native', 'firecrawl']).optional(),
   })
   .strict();
 

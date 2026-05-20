@@ -3,6 +3,7 @@ import type {
   GitHubInstallationDto,
   MemoryDto,
   MemoryListResponse,
+  MemorySearchResponse,
   SourceDto,
   SourceListResponse,
   SourceStatusDto,
@@ -71,6 +72,43 @@ export function renderMemoryList(response: MemoryListResponse, includeBody = fal
   return lines.join('\n');
 }
 
+export function renderMemorySearch(response: MemorySearchResponse, includeBody = false): string {
+  if (response.items.length === 0) return 'No memories found.';
+  const details = [
+    `mode: ${response.mode}`,
+    response.reranked ? `reranked: ${response.reranker_model ?? 'unknown'}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const lines: string[] = [];
+  lines.push(
+    `Memory search (${response.items.length} of ${response.count})${details ? ` (${details})` : ''}:`,
+  );
+  for (const hit of response.items) {
+    const m = hit.memory;
+    const ranks = [
+      hit.ranks.bm25 ? `text #${hit.ranks.bm25}` : null,
+      hit.ranks.vector ? `vector #${hit.ranks.vector}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    lines.push('');
+    lines.push(`• ${m.title}  [${m.kind}]`);
+    lines.push(`    id:        ${m.id}`);
+    lines.push(`    score:     ${formatScore(hit.score)}${ranks ? ` (${ranks})` : ''}`);
+    lines.push(`    created:   ${m.created_at}`);
+    if (m.expires_at) lines.push(`    expires:   ${m.expires_at}`);
+    if (m.tags.length > 0) lines.push(`    tags:      ${m.tags.join(', ')}`);
+    if (m.directory) lines.push(`    directory: ${m.directory}`);
+    lines.push(`    summary:   ${m.summary}`);
+    if (includeBody && m.body) {
+      lines.push('');
+      lines.push(indent(m.body, 4));
+    }
+  }
+  return lines.join('\n');
+}
+
 export function renderMemory(memory: MemoryDto, includeBody = true): string {
   return renderMemoryList({ items: [memory], total: 1, has_more: false }, includeBody);
 }
@@ -105,4 +143,8 @@ function indent(text: string, spaces: number): string {
     .split('\n')
     .map((line) => `${pad}${line}`)
     .join('\n');
+}
+
+function formatScore(score: number): string {
+  return Number.isInteger(score) ? String(score) : score.toFixed(4);
 }

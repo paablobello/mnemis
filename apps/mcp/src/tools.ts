@@ -4,6 +4,7 @@ import type {
   JobDto,
   MemoryDto,
   MemoryListResponse,
+  MemorySearchResponse,
   MnemisClient,
   SourceDto,
   SourceListResponse,
@@ -28,6 +29,10 @@ function jsonText(value: unknown): ToolResult {
   return text(`\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``);
 }
 
+function formatScore(score: number): string {
+  return Number.isInteger(score) ? String(score) : score.toFixed(4);
+}
+
 function renderMemoryList(response: MemoryListResponse, includeBody = false): string {
   if (response.items.length === 0) return '_No memories found._';
   const lines: string[] = [`# Memories (${response.items.length} of ${response.total})`, ''];
@@ -42,6 +47,46 @@ function renderMemoryList(response: MemoryListResponse, includeBody = false): st
       .filter(Boolean)
       .join(' · ');
     lines.push(`_${meta}_`);
+    lines.push('');
+    lines.push(m.summary);
+    if (includeBody && m.body) {
+      lines.push('');
+      lines.push('```');
+      lines.push(m.body);
+      lines.push('```');
+    }
+    lines.push('');
+    lines.push(`_id: \`${m.id}\`_`);
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
+function renderMemorySearch(response: MemorySearchResponse, includeBody = false): string {
+  if (response.items.length === 0) return '_No memories found._';
+  const meta = [
+    `mode: \`${response.mode}\``,
+    response.reranked ? `reranked: \`${response.reranker_model ?? 'unknown'}\`` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const lines: string[] = [`# Memory Search (${response.items.length} of ${response.count})`, ''];
+  if (meta) {
+    lines.push(`_${meta}_`);
+    lines.push('');
+  }
+  for (const hit of response.items) {
+    const m = hit.memory;
+    const ranks = [
+      hit.ranks.bm25 ? `text #${hit.ranks.bm25}` : null,
+      hit.ranks.vector ? `vector #${hit.ranks.vector}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    lines.push(`## ${m.title}`);
+    lines.push(
+      `_kind: \`${m.kind}\` · score: ${formatScore(hit.score)}${ranks ? ` · ${ranks}` : ''}_`,
+    );
     lines.push('');
     lines.push(m.summary);
     if (includeBody && m.body) {
@@ -212,6 +257,10 @@ export const sourceIndexInput = {
     .max(255)
     .optional()
     .describe('Required when indexStrategy is cron; standard 5-field cron expression'),
+  docsCrawler: z
+    .enum(['auto', 'native', 'firecrawl'])
+    .optional()
+    .describe('Docs crawler provider for docs_site sources'),
 };
 
 export async function sourceIndex(
@@ -224,11 +273,17 @@ export async function sourceIndex(
     githubInstallationId?: string;
     indexStrategy?: 'manual' | 'webhook' | 'cron';
     cronSchedule?: string;
+    docsCrawler?: 'auto' | 'native' | 'firecrawl';
   },
 ): Promise<ToolResult> {
-  const config: { branch?: string; githubInstallationId?: string } = {};
+  const config: {
+    branch?: string;
+    githubInstallationId?: string;
+    docsCrawler?: 'auto' | 'native' | 'firecrawl';
+  } = {};
   if (input.branch) config.branch = input.branch;
   if (input.githubInstallationId) config.githubInstallationId = input.githubInstallationId;
+  if (input.docsCrawler) config.docsCrawler = input.docsCrawler;
 
   const response = await ctx.client.sources.create({
     kind: input.kind,
@@ -370,7 +425,9 @@ export const memorySearchInput = {
     .boolean()
     .optional()
     .default(true)
-    .describe('Use hybrid semantic+BM25 search when true (default), keyword-only when false'),
+    .describe(
+      'Use hybrid semantic + Postgres full-text search when true (default), keyword-only when false',
+    ),
 };
 
 export async function memorySearch(
@@ -392,7 +449,7 @@ export async function memorySearch(
     directory: input.directory,
     limit: input.limit,
   });
-  return text(renderMemoryList(response, false));
+  return text(renderMemorySearch(response, false));
 }
 
 /* -------------------------------------------------------------------------- */

@@ -4,10 +4,38 @@ import type { BuildIndexResult, IndexSourceConfig, LoadedFile } from './types.ts
 const DEFAULT_MAX_PAGES = 100;
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 const USER_AGENT = 'MnemisIndexer/0.1 (+https://github.com/paablobello/mnemis)';
+const FIRECRAWL_DEFAULT_URL = 'https://api.firecrawl.dev/v2';
+const FIRECRAWL_POLL_INTERVAL_MS = 500;
+const FIRECRAWL_TIMEOUT_MS = 60_000;
 
 interface RobotsRules {
   disallow: string[];
   allow: string[];
+}
+
+interface FirecrawlCrawlResponse {
+  success?: boolean;
+  id?: string;
+  url?: string;
+  error?: string;
+}
+
+interface FirecrawlStatusResponse {
+  status?: 'scraping' | 'completed' | 'failed' | string;
+  data?: FirecrawlDocument[];
+  next?: string | null;
+  error?: string;
+}
+
+interface FirecrawlDocument {
+  markdown?: string;
+  metadata?: {
+    title?: string;
+    sourceURL?: string;
+    url?: string;
+    statusCode?: number;
+    error?: string;
+  };
 }
 
 function normalizeUrl(input: string): URL {
@@ -238,7 +266,7 @@ async function seedFromSitemap(baseUrl: URL, robotsSitemaps: URL[]): Promise<URL
   return urls;
 }
 
-export async function crawlDocsSite(
+export async function crawlDocsSiteNative(
   identifier: string,
   config: IndexSourceConfig = {},
 ): Promise<LoadedFile[]> {
@@ -291,6 +319,154 @@ export async function crawlDocsSite(
   }
 
   return files;
+}
+
+function firecrawlApiUrl(): string {
+  return (process.env.FIRECRAWL_API_URL ?? FIRECRAWL_DEFAULT_URL).replace(/\/+$/, '');
+}
+
+function firecrawlKey(): string | null {
+  return process.env.FIRECRAWL_API_KEY?.trim() || null;
+}
+
+function firecrawlPathPattern(path: string): string {
+  return normalizePattern(path)
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\\\*/g, '.*');
+}
+
+async function firecrawlJson<T>(url: string, init: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+
+  if (!res.ok) {
+    throw new Error(`Firecrawl API ${res.status}: ${text.slice(0, 500)}`);
+  }
+  return (json ?? {}) as T;
+}
+
+async function waitForFirecrawlCrawl(
+  id: string,
+  apiUrl: string,
+  apiKey: string,
+): Promise<FirecrawlDocument[]> {
+  const deadline = Date.now() + FIRECRAWL_TIMEOUT_MS;
+  let nextUrl: string | null = `${apiUrl}/crawl/${encodeURIComponent(id)}`;
+  const documents: FirecrawlDocument[] = [];
+
+  while (nextUrl) {
+    const crawlStatus: FirecrawlStatusResponse = await firecrawlJson<FirecrawlStatusResponse>(
+      nextUrl,
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+      },
+    );
+
+    if (Array.isArray(crawlStatus.data)) documents.push(...crawlStatus.data);
+    if (crawlStatus.status === 'completed') {
+      nextUrl = crawlStatus.next ?? null;
+      continue;
+    }
+    if (crawlStatus.status === 'failed') {
+      throw new Error(`Firecrawl crawl failed${crawlStatus.error ? `: ${crawlStatus.error}` : ''}`);
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Firecrawl crawl timed out after ${FIRECRAWL_TIMEOUT_MS}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, FIRECRAWL_POLL_INTERVAL_MS));
+  }
+
+  return documents;
+}
+
+export async function crawlDocsSiteWithFirecrawl(
+  identifier: string,
+  config: IndexSourceConfig = {},
+): Promise<LoadedFile[]> {
+  const apiKey = firecrawlKey();
+  if (!apiKey) {
+    throw new Error('firecrawl_not_configured: set FIRECRAWL_API_KEY or use docsCrawler=native');
+  }
+
+  const apiUrl = firecrawlApiUrl();
+  const maxPages = config.maxPages ?? DEFAULT_MAX_PAGES;
+  const started = await firecrawlJson<FirecrawlCrawlResponse>(`${apiUrl}/crawl`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      url: identifier,
+      includePaths: config.includePaths?.map(firecrawlPathPattern),
+      excludePaths: config.excludePaths?.map(firecrawlPathPattern),
+      limit: maxPages,
+      sitemap: 'include',
+      ignoreRobotsTxt: config.respectRobots === false,
+      scrapeOptions: {
+        formats: ['markdown'],
+        onlyMainContent: true,
+        removeBase64Images: true,
+        blockAds: true,
+      },
+    }),
+  });
+
+  if (!started.success || !started.id) {
+    throw new Error(`Firecrawl crawl did not start${started.error ? `: ${started.error}` : ''}`);
+  }
+
+  const docs = await waitForFirecrawlCrawl(started.id, apiUrl, apiKey);
+  const seen = new Set<string>();
+  const files: LoadedFile[] = [];
+
+  for (const doc of docs) {
+    const markdown = doc.markdown?.trim();
+    const sourceUrl = doc.metadata?.sourceURL ?? doc.metadata?.url ?? started.url ?? identifier;
+    if (!markdown || seen.has(sourceUrl)) continue;
+
+    const url = normalizeUrl(sourceUrl);
+    const path = toPathKey(url);
+    if (!shouldIncludePath(path, config)) continue;
+
+    seen.add(sourceUrl);
+    files.push({
+      path,
+      absolutePath: url.toString(),
+      content: markdown.startsWith('# ')
+        ? markdown
+        : `# ${doc.metadata?.title ?? path}\n\n${markdown}`,
+      language: 'markdown',
+      byteLength: new TextEncoder().encode(markdown).byteLength,
+      modifiedAt: new Date(),
+    });
+  }
+
+  return files;
+}
+
+export async function crawlDocsSite(
+  identifier: string,
+  config: IndexSourceConfig = {},
+): Promise<LoadedFile[]> {
+  const crawler = config.docsCrawler ?? 'auto';
+  if (crawler === 'native') return crawlDocsSiteNative(identifier, config);
+  if (crawler === 'firecrawl') return crawlDocsSiteWithFirecrawl(identifier, config);
+  if (!firecrawlKey()) return crawlDocsSiteNative(identifier, config);
+
+  try {
+    return await crawlDocsSiteWithFirecrawl(identifier, config);
+  } catch {
+    return crawlDocsSiteNative(identifier, config);
+  }
 }
 
 export async function buildDocsSiteIndex(

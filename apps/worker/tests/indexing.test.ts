@@ -86,7 +86,7 @@ before(async () => {
   );
   await writeFile(
     join(repoRoot, 'README.md'),
-    '# Mnemis Fixture\n\nHybrid search combines BM25 and vector rankings with RRF.\n',
+    '# Mnemis Fixture\n\nHybrid search combines Postgres full-text and vector rankings with RRF.\n',
   );
   await writeFile(join(repoRoot, 'node_modules', 'ignored', 'bad.js'), 'must never be indexed');
 });
@@ -320,6 +320,60 @@ describe('index worker', () => {
     assert.ok(indexedChunks.length >= 1);
     assert.ok(indexedChunks.every((chunk) => chunk.path !== 'deleted.md'));
     assert.ok(indexedChunks.every((chunk) => chunk.path.startsWith('src/')));
+  });
+
+  it('persists parent-child chunk links for large TypeScript symbols', async () => {
+    const largeRoot = join(tmpdir(), `mnemis-worker-large-${randomBytes(4).toString('hex')}`);
+    await mkdir(join(largeRoot, 'src'), { recursive: true });
+    const largeBody = Array.from({ length: 24 }, (_, i) => `  const value${i} = ${i};`).join('\n');
+    await writeFile(
+      join(largeRoot, 'src', 'large.ts'),
+      ['export function largeSymbol() {', largeBody, '  return value1;', '}'].join('\n'),
+    );
+
+    try {
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId,
+          kind: 'github_repo',
+          identifier: 'mnemis/parent-child-fixture',
+          displayName: 'parent child fixture',
+          config: {
+            localPath: largeRoot,
+            includePaths: ['src/large.ts'],
+            chunkMaxChars: 120,
+          },
+          status: 'pending',
+        })
+        .returning();
+      await db.insert(jobs).values({
+        workspaceId,
+        kind: 'index_source',
+        payload: { source_id: source!.id },
+        scheduledAt: CLAIM_FIRST,
+      });
+
+      await processOneJob(db);
+
+      const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
+      const parent = indexedChunks.find(
+        (chunk) => (chunk.metadata as { retrieval_role?: string }).retrieval_role === 'parent',
+      );
+      const children = indexedChunks.filter((chunk) => chunk.parentId === parent?.id);
+      assert.ok(parent);
+      assert.ok(children.length > 1);
+      assert.ok(children.every((chunk) => chunk.embedding === null));
+      assert.ok(
+        children.every(
+          (chunk) =>
+            (chunk.metadata as { parent_key?: string }).parent_key ===
+            (parent.metadata as { chunk_key?: string }).chunk_key,
+        ),
+      );
+    } finally {
+      await rm(largeRoot, { recursive: true, force: true });
+    }
   });
 
   it('indexes docs_site URLs through the crawler pipeline', async () => {

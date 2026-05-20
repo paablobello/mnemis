@@ -78,6 +78,15 @@ export async function embedChunksForIndexing(
   const groups = new Map<VoyageModel, { index: number; text: string }[]>();
 
   chunks.forEach((chunk, index) => {
+    if (chunk.metadata.retrieval_role === 'parent') {
+      out[index] = {
+        ...chunk,
+        embedding: null,
+        embeddingModel: null,
+        embeddingTextHash: null,
+      };
+      return;
+    }
     const model = modelForChunk(chunk);
     const text = embedTextForChunk(chunk);
     const list = groups.get(model) ?? [];
@@ -114,7 +123,7 @@ export async function embedChunksForIndexing(
     chunks: out,
     stats: {
       enabled: true,
-      embedded: chunks.length,
+      embedded: out.filter((chunk) => chunk.embedding !== null).length,
       totalTokens,
       cacheHits,
       modelCounts,

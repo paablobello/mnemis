@@ -3,6 +3,7 @@ import { type SQL, and, eq, ilike, inArray, notInArray, sql } from 'drizzle-orm'
 import { getDb } from '../db.ts';
 import type { SourceKindInput } from '../validators/sources.ts';
 import { getEmbeddings } from './embeddings.ts';
+import { type RerankStats, maybeRerank } from './rerank.ts';
 
 const RRF_K = 60;
 const POOL_PER_RETRIEVER = 50;
@@ -28,6 +29,9 @@ export interface SourceSearchResult {
   used_vector: boolean;
   embedding_model: string | null;
   embedding_tokens: number;
+  reranked: boolean;
+  reranker_model: string | null;
+  reranker_tokens: number;
 }
 
 export interface ChunkDto {
@@ -64,6 +68,7 @@ function buildFilters(workspaceId: string, filters: SourceSearchFilters): SQL<un
   const clauses: SQL<unknown>[] = [
     eq(chunks.workspaceId, workspaceId),
     eq(sources.workspaceId, workspaceId),
+    sql`coalesce(${chunks.metadata}->>'retrieval_role', 'chunk') <> 'parent'`,
   ];
 
   if (filters.sourceIds && filters.sourceIds.length > 0) {
@@ -196,7 +201,43 @@ function keywordResult(hits: ChunkSearchHit[], limit: number): SourceSearchResul
     used_vector: false,
     embedding_model: null,
     embedding_tokens: 0,
+    reranked: false,
+    reranker_model: null,
+    reranker_tokens: 0,
   };
+}
+
+async function rerankChunkHits(input: {
+  query: string;
+  hits: ChunkSearchHit[];
+  limit: number;
+}): Promise<{ hits: ChunkSearchHit[]; stats: RerankStats }> {
+  return maybeRerank(input.query, input.hits, input.limit, (hit) => ({
+    rawText: hit.chunk.rawText,
+    contextualPrefix: hit.chunk.contextualPrefix,
+    path: hit.chunk.path,
+    sectionPath: hit.chunk.sectionPath,
+  }));
+}
+
+async function expandParentHits(hits: ChunkSearchHit[], limit: number): Promise<ChunkSearchHit[]> {
+  const parentIds = [
+    ...new Set(hits.map((hit) => hit.chunk.parentId).filter((id): id is string => !!id)),
+  ];
+  if (parentIds.length === 0) return hits.slice(0, limit);
+
+  const db = getDb();
+  const parentRows = await db.select().from(chunks).where(inArray(chunks.id, parentIds));
+  const parents = new Map(parentRows.map((chunk) => [chunk.id, chunk]));
+  const deduped = new Map<string, ChunkSearchHit>();
+
+  for (const hit of hits) {
+    const chunk = hit.chunk.parentId ? (parents.get(hit.chunk.parentId) ?? hit.chunk) : hit.chunk;
+    if (deduped.has(chunk.id)) continue;
+    deduped.set(chunk.id, { ...hit, chunk });
+  }
+
+  return [...deduped.values()].slice(0, limit);
 }
 
 function fuseHits(input: {
@@ -260,7 +301,10 @@ export async function searchSourceChunks(
 
   if (retrieval === 'keyword') {
     const bm25 = await keywordLookup(workspaceId, query, filters, pool);
-    return keywordResult(bm25, limit);
+    const result = keywordResult(bm25, pool);
+    const expanded = await expandParentHits(result.hits, pool);
+    const reranked = await rerankChunkHits({ query, hits: expanded, limit });
+    return { ...result, hits: reranked.hits, ...reranked.stats };
   }
 
   const embedClient = getEmbeddings();
@@ -281,20 +325,29 @@ export async function searchSourceChunks(
   ]);
 
   if (!qvec || vector.length === 0) {
+    const result = keywordResult(bm25, pool);
+    const expanded = await expandParentHits(result.hits, pool);
+    const reranked = await rerankChunkHits({ query, hits: expanded, limit });
     return {
-      ...keywordResult(bm25, limit),
+      ...result,
+      hits: reranked.hits,
       retrieval: 'keyword_only',
       embedding_model: model,
       embedding_tokens: tokens,
+      ...reranked.stats,
     };
   }
 
+  const expanded = await expandParentHits(fuseHits({ bm25, vector, limit: pool }), pool);
+  const reranked = await rerankChunkHits({ query, hits: expanded, limit });
+
   return {
-    hits: fuseHits({ bm25, vector, limit }),
+    hits: reranked.hits,
     retrieval: 'hybrid_rrf',
     used_vector: true,
     embedding_model: model,
     embedding_tokens: tokens,
+    ...reranked.stats,
   };
 }
 

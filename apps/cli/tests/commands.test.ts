@@ -10,6 +10,7 @@ import type {
   GitHubInstallationDto,
   JobDto,
   MemoryDto,
+  MemorySearchResponse,
   MnemisClient,
   PatchMemoryInput,
   SourceDto,
@@ -257,6 +258,8 @@ describe('source commands', () => {
           '--max-pages',
           '50',
           '--no-robots',
+          '--crawler',
+          'firecrawl',
         ],
         svc,
       ),
@@ -272,6 +275,7 @@ describe('source commands', () => {
       focusInstructions: 'API reference only',
       maxPages: 50,
       respectRobots: false,
+      docsCrawler: 'firecrawl',
       contextualPrefixMode: undefined,
     });
   });
@@ -375,6 +379,9 @@ describe('search and memory commands', () => {
       used_vector: true,
       embedding_model: null,
       embedding_tokens: 0,
+      reranked: false,
+      reranker_model: null,
+      reranker_tokens: 0,
       items: [],
       citations: [],
       count: 0,
@@ -423,7 +430,7 @@ describe('search and memory commands', () => {
           inputs.push(value);
           return memory({ id: 'memory-123', title: value.title });
         },
-      } as MnemisClient['memories'],
+      } as unknown as MnemisClient['memories'],
     });
 
     const result = await capture(() =>
@@ -458,15 +465,34 @@ describe('search and memory commands', () => {
 
   it('searches memories semantically by default and by keyword on --keyword', async () => {
     const calls: string[] = [];
+    const searchResponse = (mode: MemorySearchResponse['mode']): MemorySearchResponse => ({
+      query: 'query',
+      mode,
+      embedding_model: mode === 'keyword' ? undefined : null,
+      embedding_tokens: mode === 'keyword' ? undefined : 0,
+      reranked: false,
+      reranker_model: null,
+      reranker_tokens: 0,
+      items: [
+        {
+          score: 0.42,
+          ranks: { bm25: 1, vector: mode === 'keyword' ? null : 2 },
+          bm25_score: 0.42,
+          vector_score: mode === 'keyword' ? null : 0.37,
+          memory: memory({ title: 'Search Hit' }),
+        },
+      ],
+      count: 1,
+    });
     const svc = services({
       memories: {
         async search() {
           calls.push('keyword');
-          return { items: [], total: 0, has_more: false };
+          return searchResponse('keyword');
         },
         async semanticSearch() {
           calls.push('semantic');
-          return { items: [], total: 0, has_more: false };
+          return searchResponse('hybrid_rrf');
         },
       } as unknown as MnemisClient['memories'],
     });
@@ -476,6 +502,9 @@ describe('search and memory commands', () => {
 
     assert.equal(semantic.result.exitCode, 0);
     assert.equal(keyword.result.exitCode, 0);
+    assert.match(semantic.stdout, /Memory search/);
+    assert.match(semantic.stdout, /Search Hit/);
+    assert.match(semantic.stdout, /vector #2/);
     assert.deepEqual(calls, ['semantic', 'keyword']);
   });
 

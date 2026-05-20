@@ -7,7 +7,7 @@
  * Tests do NOT mock anything — they hit the actual database. Each test
  * uses an isolated workspace bootstrapped at module load and torn down at
  * the end (cascade deletes the rows). Embeddings are *expected* to be
- * disabled (no VOYAGE_API_KEY in CI), so the tests assert the BM25 path
+ * disabled (no VOYAGE_API_KEY in CI), so the tests assert the Postgres full-text path
  * and the graceful-fallback behaviour of /semantic-search.
  */
 import assert from 'node:assert/strict';
@@ -235,7 +235,7 @@ describe('keyword search', () => {
         kind: 'fact',
         title: 'pgvector hybrid',
         summary: 'vector db',
-        body: 'Postgres pgvector HNSW with tsvector BM25 fused via Reciprocal Rank Fusion',
+        body: 'Postgres pgvector HNSW with tsvector full-text search fused via Reciprocal Rank Fusion',
         tags: ['stest', 'arch'],
       },
       {
@@ -262,7 +262,7 @@ describe('keyword search', () => {
     }
   });
 
-  it('finds the pgvector memory with BM25', async () => {
+  it('finds the pgvector memory with Postgres full-text search', async () => {
     const res = await app.request('/v1/memories/search', {
       method: 'POST',
       headers: headers(),

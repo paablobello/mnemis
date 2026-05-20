@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
+const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
 const MAX_BATCH = 128;
 const CACHE_LIMIT = 2_000;
 
 export type VoyageModel = 'voyage-3.5-large' | 'voyage-code-3';
+export type VoyageRerankModel = 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
 export type VoyageInputType = 'document' | 'query';
 
 export interface EmbedOptions {
@@ -17,6 +19,12 @@ export interface EmbedResult {
   model: VoyageModel;
   totalTokens: number;
   cacheHits: number;
+}
+
+export interface RerankResult {
+  results: Array<{ index: number; relevanceScore: number }>;
+  model: VoyageRerankModel;
+  totalTokens: number;
 }
 
 export class EmbeddingsProviderError extends Error {
@@ -148,9 +156,72 @@ export class EmbeddingsClient {
   }
 }
 
+export class VoyageRerankerClient {
+  readonly defaultModel: VoyageRerankModel;
+  private readonly apiKey: string;
+
+  constructor(apiKey: string, defaultModel: VoyageRerankModel = 'rerank-2.5') {
+    this.apiKey = apiKey;
+    this.defaultModel = defaultModel;
+  }
+
+  async rerank(
+    query: string,
+    documents: string[],
+    opts: { model?: VoyageRerankModel; topK?: number } = {},
+  ): Promise<RerankResult> {
+    const model = opts.model ?? this.defaultModel;
+    const res = await fetch(VOYAGE_RERANK_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        query,
+        documents,
+        model,
+        top_k: opts.topK,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new EmbeddingsProviderError(
+        'rerank_provider_error',
+        `Voyage rerank API ${res.status}: ${text.slice(0, 500)}`,
+      );
+    }
+
+    const json = (await res.json()) as {
+      data?: Array<{ index: number; relevance_score?: number; relevanceScore?: number }>;
+      usage?: { total_tokens?: number };
+    };
+
+    if (!Array.isArray(json.data)) {
+      throw new EmbeddingsProviderError(
+        'rerank_provider_malformed_response',
+        'Voyage rerank API returned an invalid payload',
+      );
+    }
+
+    return {
+      results: json.data.map((item) => ({
+        index: item.index,
+        relevanceScore: item.relevance_score ?? item.relevanceScore ?? 0,
+      })),
+      model,
+      totalTokens: json.usage?.total_tokens ?? 0,
+    };
+  }
+}
+
 let singleton: EmbeddingsClient | null = null;
 let singletonKey: string | null = null;
 let singletonDefaultModel: VoyageModel = 'voyage-3.5-large';
+let rerankerSingleton: VoyageRerankerClient | null = null;
+let rerankerKey: string | null = null;
+let rerankerDefaultModel: VoyageRerankModel = 'rerank-2.5';
 
 export function getEmbeddings(
   opts: { apiKey?: string; defaultModel?: VoyageModel } = {},
@@ -178,4 +249,29 @@ export function resetEmbeddingsForTests(): void {
   singleton = null;
   singletonKey = null;
   singletonDefaultModel = 'voyage-3.5-large';
+  rerankerSingleton = null;
+  rerankerKey = null;
+  rerankerDefaultModel = 'rerank-2.5';
+}
+
+export function getVoyageReranker(
+  opts: { apiKey?: string; defaultModel?: VoyageRerankModel } = {},
+): VoyageRerankerClient | null {
+  const key = opts.apiKey ?? process.env.VOYAGE_API_KEY?.trim();
+  const defaultModel = opts.defaultModel ?? 'rerank-2.5';
+
+  if (!key) {
+    rerankerSingleton = null;
+    rerankerKey = null;
+    rerankerDefaultModel = defaultModel;
+    return null;
+  }
+
+  if (!rerankerSingleton || rerankerKey !== key || rerankerDefaultModel !== defaultModel) {
+    rerankerSingleton = new VoyageRerankerClient(key, defaultModel);
+    rerankerKey = key;
+    rerankerDefaultModel = defaultModel;
+  }
+
+  return rerankerSingleton;
 }

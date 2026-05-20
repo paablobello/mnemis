@@ -11,6 +11,7 @@ import type {
   MemoryDto,
   MemoryListResponse,
   MemorySearchInput,
+  MemorySearchResponse,
   PatchMemoryInput,
   RegisterGitHubInstallationInput,
   SourceDto,
@@ -114,8 +115,8 @@ export interface MnemisClient {
     get(id: string, options?: { include?: 'lineage' | 'embedding' }): Promise<MemoryDto>;
     patch(id: string, input: PatchMemoryInput): Promise<MemoryDto>;
     remove(id: string, options?: { permanent?: boolean }): Promise<void>;
-    search(input: MemorySearchInput): Promise<MemoryListResponse>;
-    semanticSearch(input: MemorySearchInput): Promise<MemoryListResponse>;
+    search(input: MemorySearchInput): Promise<MemorySearchResponse>;
+    semanticSearch(input: MemorySearchInput): Promise<MemorySearchResponse>;
   };
   sources: {
     create(input: CreateSourceInput): Promise<{ data: SourceDto; job: JobDto | null }>;
@@ -177,14 +178,14 @@ export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
         });
       },
       search(input) {
-        return raw.request<MemoryListResponse>({
+        return raw.request<MemorySearchResponse>({
           method: 'POST',
           path: '/v1/memories/search',
           body: input,
         });
       },
       semanticSearch(input) {
-        return raw.request<MemoryListResponse>({
+        return raw.request<MemorySearchResponse>({
           method: 'POST',
           path: '/v1/memories/semantic-search',
           body: input,

@@ -95,6 +95,7 @@ function shouldContextualize(input: {
   sourceKind: SourceKind;
   chunk: IndexChunk;
 }): boolean {
+  if (input.chunk.metadata.retrieval_role === 'parent') return false;
   if (input.mode === 'never') return false;
   if (input.mode === 'always') return true;
   return input.sourceKind === 'docs_site' || isDocChunk(input.chunk);

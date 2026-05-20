@@ -80,9 +80,19 @@ describe('memories resource', () => {
   });
 
   it('search and semanticSearch hit distinct paths', async () => {
-    const responses: Array<{ items: []; total: 0; has_more: false }> = [
-      { items: [], total: 0, has_more: false },
-      { items: [], total: 0, has_more: false },
+    const responses = [
+      { query: 'q', mode: 'keyword', items: [], count: 0 },
+      {
+        query: 'q',
+        mode: 'hybrid_rrf',
+        embedding_model: null,
+        embedding_tokens: 0,
+        reranked: false,
+        reranker_model: null,
+        reranker_tokens: 0,
+        items: [],
+        count: 0,
+      },
     ];
     const { client: c, calls } = client(() => ok(responses.shift()));
     await c.memories.search({ query: 'q' });
@@ -228,6 +238,9 @@ describe('search', () => {
         used_vector: true,
         embedding_model: 'voyage-3.5-large',
         embedding_tokens: 4,
+        reranked: false,
+        reranker_model: null,
+        reranker_tokens: 0,
         items: [],
         citations: [],
         count: 0,

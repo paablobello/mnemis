@@ -8,6 +8,7 @@ export interface IndexSourceConfig {
   chunkOverlapLines?: number;
   maxPages?: number;
   respectRobots?: boolean;
+  docsCrawler?: 'auto' | 'native' | 'firecrawl';
   contextualPrefixMode?: 'auto' | 'always' | 'never';
   contextualPrefixMaxDocumentChars?: number;
   contextualPrefixMaxChunkChars?: number;
@@ -23,6 +24,8 @@ export interface LoadedFile {
 }
 
 export interface IndexChunk {
+  chunkKey?: string;
+  parentKey?: string | null;
   path: string;
   lineStart: number;
   lineEnd: number;

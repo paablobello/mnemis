@@ -121,7 +121,7 @@ server.registerTool(
   'memory_search',
   {
     description:
-      'Search memories. Hybrid BM25+vector when semantic=true (default), keyword-only when false.',
+      'Search memories. Hybrid Postgres full-text + vector when semantic=true (default), keyword-only when false.',
     inputSchema: memorySearchInput,
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown

@@ -68,6 +68,9 @@ describe('source_search tool', () => {
         used_vector: true,
         embedding_model: null,
         embedding_tokens: 0,
+        reranked: false,
+        reranker_model: null,
+        reranker_tokens: 0,
         count: 1,
         items: [],
         citations: [],
@@ -91,6 +94,9 @@ describe('source_search tool', () => {
         used_vector: true,
         embedding_model: null,
         embedding_tokens: 0,
+        reranked: false,
+        reranker_model: null,
+        reranker_tokens: 0,
         count: 1,
         items: [],
         citations: [],
@@ -147,10 +153,15 @@ describe('source_index tool', () => {
         githubInstallationId: '12345',
         indexStrategy: 'webhook',
         cronSchedule: undefined,
+        docsCrawler: 'firecrawl',
       },
     );
     const body = calls[0]!.body as { config: Record<string, unknown> };
-    assert.deepEqual(body.config, { branch: 'main', githubInstallationId: '12345' });
+    assert.deepEqual(body.config, {
+      branch: 'main',
+      githubInstallationId: '12345',
+      docsCrawler: 'firecrawl',
+    });
     assert.match(result.content[0]!.text, /owner\/repo/);
     assert.match(result.content[0]!.text, /job-1/);
   });
@@ -320,13 +331,17 @@ describe('memory tools', () => {
   });
 
   it('memory_search hits /v1/memories/semantic-search when semantic=true', async () => {
-    const { client, calls } = buildClient(() => ok({ items: [], total: 0, has_more: false }));
+    const { client, calls } = buildClient(() =>
+      ok({ query: 'q', mode: 'hybrid_rrf', items: [], count: 0 }),
+    );
     await memorySearch({ client }, { query: 'q', semantic: true });
     assert.equal(calls[0]!.url, `${BASE}/v1/memories/semantic-search`);
   });
 
   it('memory_search hits /v1/memories/search when semantic=false', async () => {
-    const { client, calls } = buildClient(() => ok({ items: [], total: 0, has_more: false }));
+    const { client, calls } = buildClient(() =>
+      ok({ query: 'q', mode: 'keyword', items: [], count: 0 }),
+    );
     await memorySearch({ client }, { query: 'q', semantic: false });
     assert.equal(calls[0]!.url, `${BASE}/v1/memories/search`);
   });

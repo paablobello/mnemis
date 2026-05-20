@@ -28,6 +28,8 @@ const READ_ONLY_HASH = createHash('sha256').update(READ_ONLY_KEY).digest('hex');
 const SOURCES_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const SOURCES_ONLY_HASH = createHash('sha256').update(SOURCES_ONLY_KEY).digest('hex');
 const ORIGINAL_VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
+const ORIGINAL_RERANK_PROVIDER = process.env.MNEMIS_RERANK_PROVIDER;
+const ORIGINAL_RERANK_MODEL = process.env.MNEMIS_RERANK_MODEL;
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_ALLOW_LOCAL_SOURCES = process.env.MNEMIS_ALLOW_LOCAL_SOURCES;
 
@@ -112,6 +114,16 @@ after(async () => {
     Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
   } else {
     process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+  }
+  if (ORIGINAL_RERANK_PROVIDER === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_RERANK_PROVIDER');
+  } else {
+    process.env.MNEMIS_RERANK_PROVIDER = ORIGINAL_RERANK_PROVIDER;
+  }
+  if (ORIGINAL_RERANK_MODEL === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_RERANK_MODEL');
+  } else {
+    process.env.MNEMIS_RERANK_MODEL = ORIGINAL_RERANK_MODEL;
   }
   resetEmbeddingsForTests();
 
@@ -311,7 +323,7 @@ describe('source chunk search', () => {
         lineEnd: 24,
         sectionPath: ['Retrieval', 'Contextual prefixes'],
         rawText:
-          'Contextual Retrieval adds a generated prefix to documentation chunks before BM25 indexing and embedding.',
+          'Contextual Retrieval adds a generated prefix to documentation chunks before full-text indexing and embedding.',
         contextualPrefix:
           'This section explains how Mnemis improves documentation retrieval quality.',
         language: 'markdown',
@@ -429,6 +441,54 @@ describe('source chunk search', () => {
     assert.equal(json.citations[0].n, 1);
     assert.equal(json.items[0].permalink, 'https://docs.example.com/retrieval#contextual-prefixes');
     assert.equal(json.items[0].citation_number, 1);
+  });
+
+  it('expands child chunk matches to their parent chunk before rendering', async () => {
+    const [parent] = await db
+      .insert(chunks)
+      .values({
+        workspaceId,
+        sourceId: docsSourceId,
+        path: 'docs/large.md',
+        lineStart: 1,
+        lineEnd: 80,
+        sectionPath: ['Large section'],
+        rawText: 'Parent context for a large documentation section.',
+        language: 'markdown',
+        metadata: { retrieval_role: 'parent', chunk_key: 'docs/large.md:1:80:parent' },
+      })
+      .returning({ id: chunks.id });
+    await db.insert(chunks).values({
+      workspaceId,
+      sourceId: docsSourceId,
+      parentId: parent!.id,
+      path: 'docs/large.md',
+      lineStart: 35,
+      lineEnd: 42,
+      sectionPath: ['Large section'],
+      rawText: 'NeedleChildTerm appears in a child chunk that should expand.',
+      language: 'markdown',
+      metadata: {
+        retrieval_role: 'child',
+        parent_key: 'docs/large.md:1:80:parent',
+      },
+    });
+
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        query: 'NeedleChildTerm',
+        sourceIds: [docsSourceId],
+        limit: 5,
+      }),
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.items[0].id, parent!.id);
+    assert.equal(json.items[0].line_start, 1);
+    assert.equal(json.items[0].line_end, 80);
+    assert.match(json.items[0].raw_text, /Parent context/);
   });
 
   it('renders markdown mode with citations and permalinks', async () => {
@@ -608,6 +668,75 @@ describe('source chunk search', () => {
     assert.ok(json.items[0].vector_score > 0.99);
 
     unsetVoyageKey();
+    resetEmbeddingsForTests();
+    globalThis.fetch = ORIGINAL_FETCH;
+  });
+
+  it('reranks source search results when Voyage reranking is enabled', async () => {
+    const inserted = await db
+      .insert(chunks)
+      .values([
+        {
+          workspaceId,
+          sourceId: docsSourceId,
+          path: 'docs/rerank-a.md',
+          lineStart: 1,
+          lineEnd: 3,
+          rawText: 'RerankTerm lower priority candidate.',
+          language: 'markdown',
+        },
+        {
+          workspaceId,
+          sourceId: docsSourceId,
+          path: 'docs/rerank-b.md',
+          lineStart: 1,
+          lineEnd: 3,
+          rawText: 'RerankTerm higher priority candidate.',
+          language: 'markdown',
+        },
+      ])
+      .returning({ id: chunks.id });
+
+    process.env.VOYAGE_API_KEY = 'test-voyage-key';
+    process.env.MNEMIS_RERANK_PROVIDER = 'voyage';
+    resetEmbeddingsForTests();
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), 'https://api.voyageai.com/v1/rerank');
+      const body = JSON.parse(String(init?.body)) as { documents: string[]; model: string };
+      assert.equal(body.model, 'rerank-2.5');
+      assert.equal(body.documents.length, 2);
+      return new Response(
+        JSON.stringify({
+          data: [
+            { index: 1, relevance_score: 0.95 },
+            { index: 0, relevance_score: 0.1 },
+          ],
+          usage: { total_tokens: 17 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        query: 'RerankTerm',
+        retrieval: 'keyword',
+        sourceIds: [docsSourceId],
+        pathPrefix: 'docs/rerank',
+        limit: 2,
+      }),
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.reranked, true);
+    assert.equal(json.reranker_model, 'rerank-2.5');
+    assert.equal(json.reranker_tokens, 17);
+    assert.equal(json.items[0].id, inserted[1]!.id);
+
+    unsetVoyageKey();
+    Reflect.deleteProperty(process.env, 'MNEMIS_RERANK_PROVIDER');
     resetEmbeddingsForTests();
     globalThis.fetch = ORIGINAL_FETCH;
   });

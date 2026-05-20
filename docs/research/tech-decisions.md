@@ -6,6 +6,12 @@
 
 Este documento es el deliverable de la Fase 0. Para cada componente clave del MVP, registra: opciones consideradas, decisión final, justificación con evidencia, riesgos asumidos.
 
+> Nota de implementación: este documento conserva el objetivo técnico investigado.
+> El estado actual del repo está en README y docs operativas: Firecrawl y Voyage
+> rerank son opcionales, TypeScript/JavaScript usan AST del compilador
+> TypeScript, Python usa chunking por indentación, y la búsqueda léxica actual
+> es Postgres `tsvector`/`ts_rank_cd`, no BM25 nativo.
+
 ---
 
 ## Resumen ejecutivo de decisiones

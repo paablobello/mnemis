@@ -1,12 +1,12 @@
 /**
  * Hybrid retrieval over memories.
  *
- *   - BM25 path: Postgres tsvector + websearch_to_tsquery + ts_rank_cd
+ *   - Lexical path: Postgres tsvector + websearch_to_tsquery + ts_rank_cd
  *   - Vector path: pgvector cosine distance (`<=>`) on the precomputed embedding
  *   - Fusion: Reciprocal Rank Fusion (RRF, k=60). Robust, no normalisation needed.
  *
- * `searchKeyword` returns BM25-only results (no embedding required).
- * `searchHybrid` returns RRF-fused results and degrades gracefully to BM25
+ * `searchKeyword` returns lexical-only results (no embedding required).
+ * `searchHybrid` returns RRF-fused results and degrades gracefully to lexical
  * alone when embeddings are disabled (no VOYAGE_API_KEY) or when the corpus
  * has no rows with embeddings yet.
  */
@@ -26,6 +26,7 @@ import {
 import { getDb } from '../db.ts';
 import type { MemoryKindInput } from '../validators/memories.ts';
 import { getEmbeddings } from './embeddings.ts';
+import { maybeRerank } from './rerank.ts';
 
 const RRF_K = 60;
 const POOL_PER_RETRIEVER = 50;
@@ -59,7 +60,7 @@ function buildBaseFilters(workspaceId: string, f: SearchFilters): SQL<unknown> {
 }
 
 /* ----------------------------------------------------------------------------
- *  BM25 (Postgres FTS)
+ *  Lexical (Postgres FTS; legacy response fields still use bm25_* names)
  * --------------------------------------------------------------------------*/
 function broadLexicalQuery(query: string): string | null {
   const terms = query.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]{2,}/gu) ?? [];
@@ -187,13 +188,16 @@ export async function searchKeyword(
 }
 
 /* ----------------------------------------------------------------------------
- *  Public: hybrid (BM25 + vector) with RRF
+ *  Public: hybrid (lexical + vector) with RRF
  * --------------------------------------------------------------------------*/
 export interface HybridResult {
   hits: SearchHit[];
   used_vector: boolean;
   embedding_model: string | null;
   embedding_tokens: number;
+  reranked: boolean;
+  reranker_model: string | null;
+  reranker_tokens: number;
 }
 
 export async function searchHybrid(
@@ -238,7 +242,9 @@ export async function searchHybrid(
     fused.set(row.id, cur);
   });
 
-  const ranked = [...fused.entries()].sort((a, b) => b[1].rrf - a[1].rrf).slice(0, limit);
+  const ranked = [...fused.entries()]
+    .sort((a, b) => b[1].rrf - a[1].rrf)
+    .slice(0, Math.max(limit, POOL_PER_RETRIEVER));
 
   const ids = ranked.map(([id]) => id);
   const loaded = await loadByIds(workspaceId, ids);
@@ -256,10 +262,17 @@ export async function searchHybrid(
     });
   }
 
+  const reranked = await maybeRerank(query, hits, limit, (hit) => ({
+    rawText: hit.memory.body,
+    path: hit.memory.directory ?? undefined,
+    sectionPath: [hit.memory.title],
+  }));
+
   return {
-    hits,
+    hits: reranked.hits,
     used_vector: qvec !== null,
     embedding_model: model,
     embedding_tokens: tokens,
+    ...reranked.stats,
   };
 }

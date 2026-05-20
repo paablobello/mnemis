@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import type { IndexChunk, LoadedFile } from './types.ts';
 
 const DEFAULT_CHUNK_MAX_CHARS = 4_000;
@@ -11,6 +12,12 @@ const BRACE_LANGUAGES = new Set([
   'javascript',
   'javascriptreact',
   'rust',
+  'typescript',
+  'typescriptreact',
+]);
+const TYPESCRIPT_AST_LANGUAGES = new Set([
+  'javascript',
+  'javascriptreact',
   'typescript',
   'typescriptreact',
 ]);
@@ -29,6 +36,8 @@ interface LineSpan {
   rawText: string;
   sectionPath: string[];
   metadata: Record<string, unknown>;
+  chunkKey?: string;
+  parentKey?: string | null;
 }
 
 function lineEndFor(lines: string[], start: number, endExclusive: number): number {
@@ -38,6 +47,8 @@ function lineEndFor(lines: string[], start: number, endExclusive: number): numbe
 function buildChunk(file: LoadedFile, span: LineSpan): IndexChunk {
   return {
     path: file.path,
+    chunkKey: span.chunkKey,
+    parentKey: span.parentKey,
     lineStart: span.lineStart,
     lineEnd: span.lineEnd,
     rawText: span.rawText,
@@ -50,6 +61,10 @@ function buildChunk(file: LoadedFile, span: LineSpan): IndexChunk {
       ...span.metadata,
     },
   };
+}
+
+function chunkKeyFor(file: LoadedFile, span: LineSpan, role = 'chunk'): string {
+  return `${file.path}:${span.lineStart}:${span.lineEnd}:${role}`;
 }
 
 function trimSpan(lines: string[], start: number, endExclusive: number): LineSpan | null {
@@ -105,6 +120,45 @@ function splitLargeSpan(lines: string[], span: LineSpan, opts: Required<ChunkOpt
   }
 
   return out;
+}
+
+function splitLargeParentChild(
+  file: LoadedFile,
+  lines: string[],
+  span: LineSpan,
+  opts: Required<ChunkOpts>,
+): IndexChunk[] {
+  if (span.rawText.length <= opts.chunkMaxChars) {
+    return [buildChunk(file, { ...span, chunkKey: chunkKeyFor(file, span) })];
+  }
+
+  const parentKey = chunkKeyFor(file, span, 'parent');
+  const parent = buildChunk(file, {
+    ...span,
+    chunkKey: parentKey,
+    metadata: {
+      ...span.metadata,
+      retrieval_role: 'parent',
+    },
+  });
+
+  const children = splitLargeSpan(lines, span, opts).map((child, index) =>
+    buildChunk(file, {
+      ...child,
+      parentKey,
+      chunkKey: `${parentKey}:child:${index + 1}`,
+      sectionPath: span.sectionPath,
+      metadata: {
+        ...child.metadata,
+        chunk_strategy: span.metadata.chunk_strategy,
+        symbol_kind: span.metadata.symbol_kind,
+        symbol_name: span.metadata.symbol_name,
+        retrieval_role: 'child',
+      },
+    }),
+  );
+
+  return [parent, ...children];
 }
 
 function lineWindowChunks(file: LoadedFile, opts: Required<ChunkOpts>): IndexChunk[] {
@@ -320,6 +374,84 @@ function braceSymbolChunks(file: LoadedFile, opts: Required<ChunkOpts>): IndexCh
     .map((span) => buildChunk(file, span));
 }
 
+function scriptKindForLanguage(language: string | null): ts.ScriptKind {
+  switch (language) {
+    case 'javascript':
+      return ts.ScriptKind.JS;
+    case 'javascriptreact':
+      return ts.ScriptKind.JSX;
+    case 'typescriptreact':
+      return ts.ScriptKind.TSX;
+    default:
+      return ts.ScriptKind.TS;
+  }
+}
+
+function topLevelTsSymbol(statement: ts.Statement): { kind: string; name: string } | null {
+  if (ts.isFunctionDeclaration(statement)) {
+    return { kind: 'function', name: statement.name?.text ?? 'default' };
+  }
+  if (ts.isClassDeclaration(statement)) {
+    return { kind: 'class', name: statement.name?.text ?? 'default' };
+  }
+  if (ts.isInterfaceDeclaration(statement)) {
+    return { kind: 'interface', name: statement.name.text };
+  }
+  if (ts.isTypeAliasDeclaration(statement)) {
+    return { kind: 'type', name: statement.name.text };
+  }
+  if (ts.isEnumDeclaration(statement)) {
+    return { kind: 'enum', name: statement.name.text };
+  }
+  if (ts.isVariableStatement(statement)) {
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+      const init = declaration.initializer;
+      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init) || ts.isClassExpression(init)) {
+        return {
+          kind: ts.isClassExpression(init) ? 'class' : 'function',
+          name: declaration.name.text,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function tsAstSymbolChunks(file: LoadedFile, opts: Required<ChunkOpts>): IndexChunk[] {
+  const lines = file.content.split(/\r?\n/);
+  const source = ts.createSourceFile(
+    file.path,
+    file.content,
+    ts.ScriptTarget.Latest,
+    false,
+    scriptKindForLanguage(file.language),
+  );
+  const spans: LineSpan[] = [];
+
+  for (const statement of source.statements) {
+    const symbol = topLevelTsSymbol(statement);
+    if (!symbol) continue;
+
+    const start = source.getLineAndCharacterOfPosition(statement.getFullStart()).line;
+    const end = source.getLineAndCharacterOfPosition(statement.end).line + 1;
+    const span = trimSpan(lines, start, end);
+    if (span) {
+      spans.push({
+        ...span,
+        sectionPath: [symbol.name],
+        metadata: {
+          chunk_strategy: 'ts_ast_symbol',
+          symbol_kind: symbol.kind,
+          symbol_name: symbol.name,
+        },
+      });
+    }
+  }
+
+  return spans.flatMap((span) => splitLargeParentChild(file, lines, span, opts));
+}
+
 export function chunkFile(file: LoadedFile, opts: ChunkOpts = {}): IndexChunk[] {
   if (file.content.trim().length === 0) return [];
 
@@ -335,6 +467,11 @@ export function chunkFile(file: LoadedFile, opts: ChunkOpts = {}): IndexChunk[] 
 
   if (file.language === 'python') {
     const chunks = pythonSymbolChunks(file, resolved);
+    if (chunks.length > 0) return chunks;
+  }
+
+  if (file.language && TYPESCRIPT_AST_LANGUAGES.has(file.language)) {
+    const chunks = tsAstSymbolChunks(file, resolved);
     if (chunks.length > 0) return chunks;
   }
 

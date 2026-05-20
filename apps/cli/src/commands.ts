@@ -12,6 +12,7 @@ import {
   renderGithubInstallations,
   renderMemory,
   renderMemoryList,
+  renderMemorySearch,
   renderSearch,
   renderSource,
   renderSourceStatus,
@@ -41,6 +42,7 @@ Usage:
                          [--focus <s>] [--max-pages N] [--no-robots]
                          [--strategy manual|cron] [--cron "0 3 * * *"]
                          [--contextual-prefix auto|always|never]
+                         [--crawler auto|native|firecrawl]
 
   mnemis search <query> [--mode markdown|raw|synthesized] [--limit N]
                         [--source <uuid>] [--kind github_repo|docs_site]
@@ -80,6 +82,7 @@ const INDEX_STRATEGIES = ['manual', 'webhook', 'cron'] as const;
 const MEMORY_KINDS = ['working', 'session', 'fact', 'procedural'] as const;
 const SEARCH_MODES = ['raw', 'markdown', 'synthesized'] as const;
 const CONTEXTUAL_PREFIX_MODES = ['auto', 'always', 'never'] as const;
+const DOCS_CRAWLERS = ['auto', 'native', 'firecrawl'] as const;
 
 export function printHelp(): void {
   out(HELP_TEXT);
@@ -256,6 +259,7 @@ export async function cmdDocsAdd(argv: string[], services: CliServices): Promise
       strategy: { type: 'string' },
       cron: { type: 'string' },
       'contextual-prefix': { type: 'string' },
+      crawler: { type: 'string' },
     },
     allowPositionals: true,
     strict: true,
@@ -269,6 +273,7 @@ export async function cmdDocsAdd(argv: string[], services: CliServices): Promise
     '--contextual-prefix',
   );
   const maxPages = positiveInt(values['max-pages'], '--max-pages');
+  const docsCrawler = optionalEnum(values.crawler, DOCS_CRAWLERS, '--crawler');
   const strategy =
     optionalEnum(values.strategy, ['manual', 'cron'] as const, '--strategy') ?? 'manual';
   if (strategy === 'cron' && !values.cron) return fail('--cron is required when --strategy cron');
@@ -285,6 +290,7 @@ export async function cmdDocsAdd(argv: string[], services: CliServices): Promise
       focusInstructions: values.focus,
       maxPages,
       respectRobots: values['no-robots'] ? false : undefined,
+      docsCrawler,
       contextualPrefixMode,
     },
     indexStrategy: strategy,
@@ -417,7 +423,7 @@ export async function cmdMemorySearch(
   const response = values.keyword
     ? await client.memories.search(input)
     : await client.memories.semanticSearch(input);
-  out(renderMemoryList(response, false));
+  out(renderMemorySearch(response, false));
   return { exitCode: 0 };
 }
 

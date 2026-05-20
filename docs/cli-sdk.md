@@ -37,7 +37,8 @@ bun run cli repos add owner/repo \
 bun run cli docs add https://docs.example.com \
   --include /api \
   --exclude /blog \
-  --max-pages 100
+  --max-pages 100 \
+  --crawler auto
 
 bun run cli docs add https://docs.example.com \
   --strategy cron \
@@ -105,6 +106,7 @@ const source = await client.sources.create({
 await client.sources.create({
   kind: 'docs_site',
   identifier: 'https://docs.example.com',
+  config: { docsCrawler: 'auto', maxPages: 100 },
   indexStrategy: 'cron',
   cronSchedule: '0 3 * * *',
   enqueue: true,
@@ -142,3 +144,11 @@ status, API error code, message, and response details.
 `config.localPath` is intentionally disabled by default because it lets API
 users ask the worker to read local server files. Use it only in trusted local
 development with `MNEMIS_ALLOW_LOCAL_SOURCES=true`.
+
+Docs crawling defaults to `docsCrawler: 'auto'`: it uses Firecrawl when
+`FIRECRAWL_API_KEY` is configured and otherwise falls back to the native
+same-origin crawler.
+
+Search reranking is optional. Set `MNEMIS_RERANK_PROVIDER=voyage` and
+`VOYAGE_API_KEY` to rerank the post-fusion candidate pool with Voyage; leave it
+unset for the current Postgres full-text/vector RRF behavior.

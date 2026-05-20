@@ -69,7 +69,7 @@ describe('chunkFile', () => {
     );
   });
 
-  it('chunks brace languages by top-level symbols', () => {
+  it('chunks TypeScript by top-level AST symbols', () => {
     const content = [
       'export function alpha() {',
       '  return 1;',
@@ -93,7 +93,31 @@ describe('chunkFile', () => {
       chunks.map((chunk) => (chunk.metadata as { symbol_name?: string }).symbol_name),
       ['alpha', 'beta'],
     );
-    assert.ok(chunks.every((chunk) => chunk.metadata.chunk_strategy === 'brace_symbol'));
+    assert.ok(chunks.every((chunk) => chunk.metadata.chunk_strategy === 'ts_ast_symbol'));
+  });
+
+  it('creates parent-child chunks for large TypeScript symbols', () => {
+    const body = Array.from({ length: 20 }, (_, i) => `  const value${i} = ${i};`).join('\n');
+    const content = ['export function large() {', body, '  return value1;', '}'].join('\n');
+    const chunks = chunkFile(
+      {
+        path: 'src/large.ts',
+        absolutePath: '/tmp/src/large.ts',
+        content,
+        language: 'typescript',
+        byteLength: content.length,
+        modifiedAt: new Date('2026-05-16T10:00:00.000Z'),
+      },
+      { chunkMaxChars: 120, chunkOverlapLines: 1 },
+    );
+
+    const parent = chunks.find((chunk) => chunk.metadata.retrieval_role === 'parent');
+    const children = chunks.filter((chunk) => chunk.metadata.retrieval_role === 'child');
+    assert.ok(parent);
+    assert.ok(parent.chunkKey);
+    assert.ok(children.length > 1);
+    assert.ok(children.every((chunk) => chunk.parentKey === parent.chunkKey));
+    assert.ok(children.every((chunk) => chunk.metadata.symbol_name === 'large'));
   });
 
   it('chunks Python by def and class blocks', () => {

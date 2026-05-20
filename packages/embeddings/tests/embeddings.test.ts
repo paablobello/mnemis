@@ -3,7 +3,9 @@ import { afterEach, describe, it } from 'node:test';
 import {
   EmbeddingsClient,
   EmbeddingsProviderError,
+  VoyageRerankerClient,
   getEmbeddings,
+  getVoyageReranker,
   resetEmbeddingsForTests,
 } from '../src/index.ts';
 
@@ -69,5 +71,49 @@ describe('EmbeddingsClient', () => {
       () => client.embed('alpha', { inputType: 'query' }),
       (err) => err instanceof EmbeddingsProviderError && err.code === 'embeddings_provider_error',
     );
+  });
+});
+
+describe('VoyageRerankerClient', () => {
+  it('calls the Voyage rerank endpoint and preserves provider order', async () => {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), 'https://api.voyageai.com/v1/rerank');
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        documents: string[];
+        model: string;
+        top_k: number;
+      };
+      assert.equal(body.query, 'how to search');
+      assert.deepEqual(body.documents, ['doc a', 'doc b']);
+      assert.equal(body.model, 'rerank-2.5');
+      assert.equal(body.top_k, 2);
+      return new Response(
+        JSON.stringify({
+          data: [
+            { index: 1, relevance_score: 0.9 },
+            { index: 0, relevance_score: 0.2 },
+          ],
+          usage: { total_tokens: 12 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+
+    const client = new VoyageRerankerClient('test');
+    const result = await client.rerank('how to search', ['doc a', 'doc b'], { topK: 2 });
+    assert.deepEqual(result.results, [
+      { index: 1, relevanceScore: 0.9 },
+      { index: 0, relevanceScore: 0.2 },
+    ]);
+    assert.equal(result.totalTokens, 12);
+  });
+
+  it('returns null when the env key is absent and recreates when it appears', () => {
+    unsetVoyageKey();
+    assert.equal(getVoyageReranker(), null);
+
+    process.env.VOYAGE_API_KEY = 'test-key';
+    assert.ok(getVoyageReranker());
   });
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type Database, and, chunks, eq, jobs, sources, sql } from '@mnemis/db';
+import { type Database, and, chunks, eq, inArray, jobs, sources, sql } from '@mnemis/db';
 import { type IndexSourceConfig, buildDocsSiteIndex, buildLocalSourceIndex } from '@mnemis/indexer';
 import { applyContextualPrefixes } from './contextual-prefix.ts';
 import { enqueueDueCronJobs } from './cron.ts';
@@ -57,6 +57,12 @@ function asConfig(value: unknown): IndexSourceConfig {
       typeof config.chunkOverlapLines === 'number' ? config.chunkOverlapLines : undefined,
     maxPages: typeof config.maxPages === 'number' ? config.maxPages : undefined,
     respectRobots: typeof config.respectRobots === 'boolean' ? config.respectRobots : undefined,
+    docsCrawler:
+      config.docsCrawler === 'auto' ||
+      config.docsCrawler === 'native' ||
+      config.docsCrawler === 'firecrawl'
+        ? config.docsCrawler
+        : undefined,
     focusInstructions:
       typeof config.focusInstructions === 'string' ? config.focusInstructions : undefined,
     contextualPrefixMode:
@@ -211,10 +217,12 @@ function chunkInsertValues(input: {
   sourceId: string;
   runId: string;
   chunks: EmbeddedIndexChunk[];
+  parentIdsByKey?: Map<string, string>;
 }): (typeof chunks.$inferInsert)[] {
   return input.chunks.map((chunk) => ({
     workspaceId: input.workspaceId,
     sourceId: input.sourceId,
+    parentId: chunk.parentKey ? input.parentIdsByKey?.get(chunk.parentKey) : undefined,
     path: chunk.path,
     lineStart: chunk.lineStart,
     lineEnd: chunk.lineEnd,
@@ -226,6 +234,8 @@ function chunkInsertValues(input: {
     metadata: {
       ...chunk.metadata,
       index_run_id: input.runId,
+      ...(chunk.chunkKey ? { chunk_key: chunk.chunkKey } : {}),
+      ...(chunk.parentKey ? { parent_key: chunk.parentKey } : {}),
       ...(chunk.embeddingModel
         ? {
             embedding_model: chunk.embeddingModel,
@@ -237,25 +247,23 @@ function chunkInsertValues(input: {
   }));
 }
 
-async function upsertChunks(input: {
+async function upsertChunkBatch(input: {
   db: Database;
-  workspaceId: string;
-  sourceId: string;
-  runId: string;
-  chunks: EmbeddedIndexChunk[];
-}): Promise<{ upserted: number; deleted: number }> {
-  const values = chunkInsertValues(input);
+  values: (typeof chunks.$inferInsert)[];
+}): Promise<number> {
   const batchSize = 250;
   let upserted = 0;
 
-  for (let start = 0; start < values.length; start += batchSize) {
-    const batch = values.slice(start, start + batchSize);
+  for (let start = 0; start < input.values.length; start += batchSize) {
+    const batch = input.values.slice(start, start + batchSize);
+    if (batch.length === 0) continue;
     await input.db
       .insert(chunks)
       .values(batch)
       .onConflictDoUpdate({
         target: [chunks.sourceId, chunks.path, chunks.lineStart, chunks.lineEnd],
         set: {
+          parentId: sql`excluded.parent_id`,
           rawText: sql`excluded.raw_text`,
           contextualPrefix: sql`excluded.contextual_prefix`,
           language: sql`excluded.language`,
@@ -267,6 +275,63 @@ async function upsertChunks(input: {
       });
     upserted += batch.length;
   }
+
+  return upserted;
+}
+
+async function loadParentIdsByKey(input: {
+  db: Database;
+  workspaceId: string;
+  sourceId: string;
+  parentKeys: string[];
+}): Promise<Map<string, string>> {
+  if (input.parentKeys.length === 0) return new Map();
+
+  const rows = await input.db
+    .select({
+      id: chunks.id,
+      key: sql<string>`${chunks.metadata}->>'chunk_key'`,
+    })
+    .from(chunks)
+    .where(
+      and(
+        eq(chunks.workspaceId, input.workspaceId),
+        eq(chunks.sourceId, input.sourceId),
+        inArray(sql<string>`${chunks.metadata}->>'chunk_key'`, input.parentKeys),
+      ),
+    );
+
+  return new Map(rows.map((row) => [row.key, row.id]));
+}
+
+async function upsertChunks(input: {
+  db: Database;
+  workspaceId: string;
+  sourceId: string;
+  runId: string;
+  chunks: EmbeddedIndexChunk[];
+}): Promise<{ upserted: number; deleted: number }> {
+  const parentOrRootChunks = input.chunks.filter((chunk) => !chunk.parentKey);
+  const childChunks = input.chunks.filter((chunk) => chunk.parentKey);
+  const parentValues = chunkInsertValues({ ...input, chunks: parentOrRootChunks });
+  let upserted = await upsertChunkBatch({ db: input.db, values: parentValues });
+
+  const parentKeys = [
+    ...new Set(childChunks.map((chunk) => chunk.parentKey).filter((key): key is string => !!key)),
+  ];
+  const parentIdsByKey = await loadParentIdsByKey({
+    db: input.db,
+    workspaceId: input.workspaceId,
+    sourceId: input.sourceId,
+    parentKeys,
+  });
+
+  const childValues = chunkInsertValues({
+    ...input,
+    chunks: childChunks,
+    parentIdsByKey,
+  });
+  upserted += await upsertChunkBatch({ db: input.db, values: childValues });
 
   const stale = await input.db
     .delete(chunks)
