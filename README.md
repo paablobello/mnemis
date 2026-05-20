@@ -43,6 +43,26 @@ bun run cli status
 
 For full CLI and SDK usage, see [`docs/cli-sdk.md`](./docs/cli-sdk.md).
 
+## Production self-host (Docker)
+
+A ready-to-run stack with Postgres + API + worker lives in
+`docker/docker-compose.prod.yml`:
+
+```bash
+cp .env.prod.example .env.prod
+# edit POSTGRES_PASSWORD, INTERNAL_AUTH_SECRET and any provider keys you need
+docker compose -f docker/docker-compose.prod.yml --env-file .env.prod up -d
+
+# one-off: push the schema (or run migrations)
+docker compose -f docker/docker-compose.prod.yml --env-file .env.prod \
+  exec api bun run apps/api/src/index.ts --help  # warm the image
+```
+
+The API listens on `${API_PORT}` (default 8787); both api and worker share
+the same Postgres volume and start with healthchecks. Optional integrations
+(Voyage, Anthropic, Firecrawl, GitHub App, local reranker) are pure env
+vars — set them in `.env.prod` and `docker compose restart`.
+
 ## Architecture
 
 Single Postgres for everything (pgvector + tsvector + relational data + jobs table). TypeScript everywhere (Bun + Node 22). MCP server, REST API, CLI, and integrations share the same TypeScript SDK. Docs can use the native crawler or Firecrawl when `FIRECRAWL_API_KEY` is configured.

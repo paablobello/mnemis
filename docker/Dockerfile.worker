@@ -1,0 +1,24 @@
+# Mnemis worker image (indexing jobs, cron polling, GitHub clone).
+FROM oven/bun:1.3.1-alpine
+
+# git is required for cloneGitHubRepo.
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /app
+
+COPY package.json bun.lock turbo.json tsconfig.base.json ./
+COPY apps/worker/package.json apps/worker/
+COPY packages/db/package.json packages/db/
+COPY packages/embeddings/package.json packages/embeddings/
+COPY packages/indexer/package.json packages/indexer/
+
+RUN bun install --frozen-lockfile --production
+
+COPY apps/worker ./apps/worker
+COPY packages/db ./packages/db
+COPY packages/embeddings ./packages/embeddings
+COPY packages/indexer ./packages/indexer
+
+ENV NODE_ENV=production
+
+CMD ["bun", "run", "apps/worker/src/index.ts"]

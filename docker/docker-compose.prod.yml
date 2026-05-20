@@ -1,0 +1,74 @@
+name: mnemis-prod
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mnemis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-mnemis}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mnemis} -d ${POSTGRES_DB:-mnemis}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-mnemis}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mnemis}
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET is required}
+      API_HOST: 0.0.0.0
+      API_PORT: '8787'
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MNEMIS_MODE: ${MNEMIS_MODE:-self-host}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      MNEMIS_RERANK_PROVIDER: ${MNEMIS_RERANK_PROVIDER:-}
+      MNEMIS_LOCAL_RERANK_MODEL: ${MNEMIS_LOCAL_RERANK_MODEL:-}
+    ports:
+      - '${API_PORT:-8787}:8787'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8787/health > /dev/null 2>&1 || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-mnemis}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mnemis}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-1000}
+
+volumes:
+  postgres-data:

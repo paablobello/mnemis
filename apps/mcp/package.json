@@ -1,24 +1,39 @@
 {
   "name": "@mnemis/mcp",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "MCP server exposing the Mnemis HTTP API to AI agents",
   "type": "module",
   "bin": {
-    "mnemis-mcp": "bin/mnemis-mcp.js"
+    "mnemis-mcp": "dist/index.js"
   },
+  "files": ["dist", "README.md"],
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "start": "node --experimental-strip-types src/index.ts",
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js --external @modelcontextprotocol/sdk --external zod",
+    "prepublishOnly": "bun run build && chmod +x dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
-    "@mnemis/sdk": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@mnemis/sdk": "workspace:*",
     "@types/node": "^22.9.0",
     "typescript": "^5.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paablobello/mnemis.git",
+    "directory": "apps/mcp"
   }
 }

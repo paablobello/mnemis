@@ -1,5 +1,5 @@
 export { createMnemisClient } from './client.ts';
-export type { MnemisClient, MnemisClientOptions } from './client.ts';
+export type { MnemisClient, MnemisClientOptions, StreamStatusEvent } from './client.ts';
 export { MnemisApiError } from './errors.ts';
 export type {
   ChunkSearchCitation,

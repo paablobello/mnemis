@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+**/.next
+.git
+.github
+.claude
+.gitignore
+.env
+.env.local
+docker/docker-compose.yml
+docker/Dockerfile*

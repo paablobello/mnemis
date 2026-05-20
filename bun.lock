@@ -29,30 +29,28 @@
     },
     "apps/cli": {
       "name": "@mnemis/cli",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "bin": {
-        "mnemis": "bin/mnemis.js",
-      },
-      "dependencies": {
-        "@mnemis/sdk": "workspace:*",
+        "mnemis": "dist/index.js",
       },
       "devDependencies": {
+        "@mnemis/sdk": "workspace:*",
         "@types/node": "^22.9.0",
         "typescript": "^5.6.3",
       },
     },
     "apps/mcp": {
       "name": "@mnemis/mcp",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "bin": {
-        "mnemis-mcp": "src/index.ts",
+        "mnemis-mcp": "dist/index.js",
       },
       "dependencies": {
-        "@mnemis/sdk": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.0.4",
         "zod": "^3.23.8",
       },
       "devDependencies": {
+        "@mnemis/sdk": "workspace:*",
         "@types/node": "^22.9.0",
         "typescript": "^5.6.3",
       },
@@ -99,6 +97,9 @@
     "packages/eval": {
       "name": "@mnemis/eval",
       "version": "0.0.0",
+      "dependencies": {
+        "@mnemis/sdk": "workspace:*",
+      },
       "devDependencies": {
         "@types/node": "^22.9.0",
         "typescript": "^5.6.3",

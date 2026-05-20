@@ -7,6 +7,13 @@ import type {
   SourceStatus,
 } from '@mnemis/sdk';
 import { clearCredentials, maskKey, readCredentials, writeCredentials } from './credentials.ts';
+import {
+  type McpClientTarget,
+  type WriteOutcome,
+  buildMnemisServerEntry,
+  defaultMcpTargets,
+  writeMcpEntry,
+} from './init.ts';
 import { err, out, prompt, readStdin } from './io.ts';
 import {
   renderGithubInstallations,
@@ -70,6 +77,10 @@ Usage:
   mnemis github installations register --installation <id> --account <login>
                                       [--account-type <s>] [--repository-selection all|selected]
                                       [--event <name>] [--permissions-json <json>]
+
+  mnemis init [--force] [--dry-run]
+      Detect Claude Code, Cursor, Windsurf and Zed config files and append
+      Mnemis as an MCP server.
 
 Environment overrides:
   MNEMIS_API_URL, MNEMIS_API_KEY  Skip the credentials file when set.
@@ -183,6 +194,60 @@ export async function cmdAuthStatus(services: CliServices): Promise<CommandResul
   }
   out(`api_url: ${credentials.api_url}`);
   out(`api_key: ${maskKey(credentials.api_key)}`);
+  return { exitCode: 0 };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  init                                                                       */
+/* -------------------------------------------------------------------------- */
+
+function describeOutcome(target: McpClientTarget, outcome: WriteOutcome): string {
+  if (outcome.status === 'created') return `  ✓ ${target.name}: created ${outcome.path}`;
+  if (outcome.status === 'updated')
+    return `  ✓ ${target.name}: updated ${outcome.path} (backup at ${outcome.backup})`;
+  return `  – ${target.name}: already configured at ${outcome.path}`;
+}
+
+export async function cmdInit(argv: string[], services: CliServices): Promise<CommandResult> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      force: { type: 'boolean' },
+      'dry-run': { type: 'boolean' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+
+  const credentials = await readCredentials(services.env);
+  if (!credentials) {
+    return fail("No credentials found. Run 'mnemis auth login' first.");
+  }
+
+  const targets = defaultMcpTargets(services.env);
+  const entry = buildMnemisServerEntry({
+    apiUrl: credentials.api_url,
+    apiKey: credentials.api_key,
+  });
+
+  out('Configuring MCP servers…');
+  if (values['dry-run']) {
+    out('(dry-run mode: nothing is written)');
+    for (const target of targets) {
+      out(`  • ${target.name}: would write to ${target.path}`);
+    }
+    return { exitCode: 0 };
+  }
+
+  for (const target of targets) {
+    try {
+      const outcome = await writeMcpEntry(target, entry, { force: values.force });
+      out(describeOutcome(target, outcome));
+    } catch (caught) {
+      err(`  ✗ ${target.name}: ${caught instanceof Error ? caught.message : String(caught)}`);
+    }
+  }
+  out('Done. Restart your MCP client to pick up the new server.');
   return { exitCode: 0 };
 }
 
@@ -617,18 +682,37 @@ export async function cmdSourcesStatus(
   argv: string[],
   services: CliServices,
 ): Promise<CommandResult> {
-  const { positionals } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: argv,
     strict: true,
     allowPositionals: true,
-    options: {},
+    options: { follow: { type: 'boolean' } },
   });
   const id = positionals[0];
   if (!id) return fail('Expected <source_id>');
 
   const client = await services.client();
-  const status = await client.sources.status(id);
-  out(renderSourceStatus(status));
+  if (!values.follow) {
+    const status = await client.sources.status(id);
+    out(renderSourceStatus(status));
+    return { exitCode: 0 };
+  }
+
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort();
+  process.on('SIGINT', onSignal);
+  try {
+    await client.sources.streamStatus(
+      id,
+      (event) => {
+        if (event.event === 'progress') out(`[progress] ${renderSourceStatus(event.data)}\n`);
+        else out(`[done] ${renderSourceStatus(event.data)}`);
+      },
+      { signal: controller.signal },
+    );
+  } finally {
+    process.off('SIGINT', onSignal);
+  }
   return { exitCode: 0 };
 }
 
@@ -768,6 +852,8 @@ export async function dispatch(argv: string[], services: CliServices): Promise<C
       return fail(`Unknown github subcommand: ${second ?? '(none)'}`);
     }
     if (first === 'status') return await cmdSourcesList(prepend(second, rest), services);
+    if (first === 'init')
+      return await cmdInit([second, ...rest].filter(Boolean) as string[], services);
     return fail(`Unknown command: ${first}. Run 'mnemis help' for usage.`);
   } catch (caught) {
     if (caught instanceof NotAuthenticatedError) {

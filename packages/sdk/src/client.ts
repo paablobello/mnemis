@@ -107,6 +107,11 @@ function memoryListQuery(query?: ListMemoriesQuery): RequestOptions['query'] {
   };
 }
 
+export interface StreamStatusEvent {
+  event: 'progress' | 'done';
+  data: SourceStatusDto;
+}
+
 export interface MnemisClient {
   raw: RawClient;
   memories: {
@@ -123,6 +128,11 @@ export interface MnemisClient {
     list(query?: ListSourcesQuery): Promise<SourceListResponse>;
     get(id: string): Promise<{ data: SourceDto }>;
     status(id: string): Promise<SourceStatusDto>;
+    streamStatus(
+      id: string,
+      onEvent: (event: StreamStatusEvent) => void,
+      options?: { signal?: AbortSignal },
+    ): Promise<void>;
     reindex(id: string): Promise<{ job: JobDto }>;
   };
   github: {
@@ -134,8 +144,51 @@ export interface MnemisClient {
   search(input: ChunkSearchInput): Promise<ChunkSearchResponse>;
 }
 
+async function consumeSseStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: StreamStatusEvent) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let separatorIndex: number;
+    // biome-ignore lint/suspicious/noAssignInExpressions: while-loop over delimiter scans
+    while ((separatorIndex = buffer.indexOf('\n\n')) >= 0) {
+      const raw = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      const evt = parseSseEvent(raw);
+      if (evt) onEvent(evt);
+    }
+  }
+}
+
+function parseSseEvent(raw: string): StreamStatusEvent | null {
+  let event = 'message';
+  const dataLines: string[] = [];
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim());
+    }
+  }
+  if (dataLines.length === 0) return null;
+  try {
+    const data = JSON.parse(dataLines.join('\n')) as SourceStatusDto;
+    return { event: event === 'done' ? 'done' : 'progress', data };
+  } catch {
+    return null;
+  }
+}
+
 export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
   const raw = createRawClient(options);
+  const baseUrl = options.apiUrl.replace(/\/+$/, '');
+  const fetcher = options.fetch ?? fetch;
 
   return {
     raw,
@@ -218,6 +271,26 @@ export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
           method: 'GET',
           path: `/v1/sources/${encodeURIComponent(id)}/status`,
         });
+      },
+      async streamStatus(id, onEvent, opts = {}) {
+        const url = `${baseUrl}/v1/sources/${encodeURIComponent(id)}/status/stream`;
+        const response = await fetcher(url, {
+          method: 'GET',
+          headers: {
+            accept: 'text/event-stream',
+            authorization: `Bearer ${options.apiKey}`,
+          },
+          signal: opts.signal,
+        });
+        if (!response.ok || !response.body) {
+          const text = await response.text().catch(() => '');
+          throw new MnemisApiError(
+            response.status,
+            `http_${response.status}`,
+            text.slice(0, 500) || response.statusText,
+          );
+        }
+        await consumeSseStream(response.body, onEvent);
       },
       reindex(id) {
         return raw.request<{ job: JobDto }>({

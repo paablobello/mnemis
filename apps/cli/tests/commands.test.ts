@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -679,5 +679,100 @@ describe('github commands', () => {
       events: ['push'],
       installedAt: undefined,
     });
+  });
+});
+
+describe('init wizard', () => {
+  it('writes mcpServers.mnemis to detected client configs', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mnemis-cli-home-'));
+    const xdg = join(home, '.config');
+    const env: NodeJS.ProcessEnv = {
+      HOME: home,
+      XDG_CONFIG_HOME: xdg,
+      MNEMIS_CREDENTIALS_FILE: join(home, 'credentials.json'),
+    };
+    try {
+      await writeFile(
+        env.MNEMIS_CREDENTIALS_FILE!,
+        JSON.stringify({ api_url: 'http://localhost:8787', api_key: 'mn_test_key' }),
+      );
+
+      const svc = services({}, env);
+      const result = await capture(() => dispatch(['init'], svc));
+      assert.equal(result.result.exitCode, 0);
+      assert.match(result.stdout, /Configuring MCP servers/);
+
+      const claudePath = join(home, '.claude', 'settings.json');
+      const claude = JSON.parse(await readFile(claudePath, 'utf8')) as {
+        mcpServers: Record<string, { command: string; env?: Record<string, string> }>;
+      };
+      assert.equal(claude.mcpServers.mnemis!.command, 'npx');
+      assert.equal(claude.mcpServers.mnemis!.env?.MNEMIS_API_URL, 'http://localhost:8787');
+      assert.equal(claude.mcpServers.mnemis!.env?.MNEMIS_API_KEY, 'mn_test_key');
+
+      const zedPath = join(xdg, 'zed', 'settings.json');
+      const zed = JSON.parse(await readFile(zedPath, 'utf8')) as {
+        context_servers: Record<string, { command: string }>;
+      };
+      assert.equal(zed.context_servers.mnemis!.command, 'npx');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves existing servers when writing the new entry', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mnemis-cli-home-'));
+    const env: NodeJS.ProcessEnv = {
+      HOME: home,
+      MNEMIS_CREDENTIALS_FILE: join(home, 'credentials.json'),
+    };
+    try {
+      await writeFile(
+        env.MNEMIS_CREDENTIALS_FILE!,
+        JSON.stringify({ api_url: 'http://localhost:8787', api_key: 'mn_test_key' }),
+      );
+      const cursorPath = join(home, '.cursor', 'mcp.json');
+      await mkdir(join(home, '.cursor'), { recursive: true });
+      await writeFile(
+        cursorPath,
+        JSON.stringify({
+          mcpServers: {
+            other: { command: 'node', args: ['./other.js'], env: { FOO: 'bar' } },
+          },
+        }),
+      );
+
+      const svc = services({}, env);
+      const result = await capture(() => dispatch(['init'], svc));
+      assert.equal(result.result.exitCode, 0);
+
+      const cursor = JSON.parse(await readFile(cursorPath, 'utf8')) as {
+        mcpServers: Record<string, unknown>;
+      };
+      assert.ok(cursor.mcpServers.other);
+      assert.ok(cursor.mcpServers.mnemis);
+
+      const backup = await readFile(`${cursorPath}.mnemis.bak`, 'utf8');
+      assert.match(backup, /other/);
+      assert.doesNotMatch(backup, /mnemis/);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when no credentials are configured', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mnemis-cli-home-'));
+    const env: NodeJS.ProcessEnv = {
+      HOME: home,
+      MNEMIS_CREDENTIALS_FILE: join(home, 'no-such-file.json'),
+    };
+    try {
+      const svc = services({}, env);
+      const result = await capture(() => dispatch(['init'], svc));
+      assert.equal(result.result.exitCode, 1);
+      assert.match(result.stderr, /No credentials found/);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

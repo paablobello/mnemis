@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { ApiError } from '../errors.ts';
 import { requireScopes } from '../middleware/auth.ts';
@@ -12,6 +13,9 @@ import {
   sourceToDto,
 } from '../services/sources.ts';
 import { createSourceSchema, listSourcesQuerySchema } from '../validators/sources.ts';
+
+const STATUS_STREAM_INTERVAL_MS = 1_500;
+const STATUS_STREAM_MAX_DURATION_MS = 10 * 60_000;
 
 export const sourcesRoutes = new Hono();
 
@@ -60,6 +64,38 @@ sourcesRoutes.get('/:id/status', requireScopes('sources:read'), async (c) => {
   const id = idParam.parse(c.req.param('id'));
   const status = await getSourceStatus(auth.workspaceId, id);
   return c.json(status);
+});
+
+sourcesRoutes.get('/:id/status/stream', requireScopes('sources:read'), (c) => {
+  const auth = c.get('auth');
+  const id = idParam.parse(c.req.param('id'));
+
+  return streamSSE(c, async (stream) => {
+    const deadline = Date.now() + STATUS_STREAM_MAX_DURATION_MS;
+    let aborted = false;
+    stream.onAbort(() => {
+      aborted = true;
+    });
+
+    let eventId = 0;
+    while (!aborted && Date.now() < deadline) {
+      const snapshot = await getSourceStatus(auth.workspaceId, id);
+      eventId += 1;
+      const finished =
+        snapshot.source.status === 'indexed' ||
+        snapshot.source.status === 'failed' ||
+        !snapshot.latest_job ||
+        snapshot.latest_job.status === 'completed' ||
+        snapshot.latest_job.status === 'failed';
+      await stream.writeSSE({
+        id: String(eventId),
+        event: finished ? 'done' : 'progress',
+        data: JSON.stringify(snapshot),
+      });
+      if (finished) return;
+      await stream.sleep(STATUS_STREAM_INTERVAL_MS);
+    }
+  });
 });
 
 sourcesRoutes.post('/:id/reindex', requireScopes('sources:write'), async (c) => {

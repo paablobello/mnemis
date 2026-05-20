@@ -1,22 +1,35 @@
 {
   "name": "@mnemis/cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "CLI for the Mnemis memory and retrieval platform",
   "type": "module",
   "bin": {
-    "mnemis": "bin/mnemis.js"
+    "mnemis": "dist/index.js"
   },
+  "files": ["dist", "README.md"],
   "scripts": {
     "dev": "node --experimental-strip-types src/index.ts",
     "start": "node --experimental-strip-types src/index.ts",
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js --define process.env.NODE_ENV='\"production\"'",
+    "prepublishOnly": "bun run build && chmod +x dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
-  "dependencies": {
-    "@mnemis/sdk": "workspace:*"
-  },
   "devDependencies": {
+    "@mnemis/sdk": "workspace:*",
     "@types/node": "^22.9.0",
     "typescript": "^5.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paablobello/mnemis.git",
+    "directory": "apps/cli"
   }
 }
