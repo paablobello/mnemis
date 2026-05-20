@@ -8,6 +8,7 @@ const DEFAULT_MAX_DOCUMENT_CHARS = 80_000;
 const DEFAULT_MAX_CHUNK_CHARS = 8_000;
 const MAX_PREFIX_CHARS = 1_000;
 const DOC_LANGUAGES = new Set(['markdown', 'mdx', 'text', 'html']);
+const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 
 type ContextualPrefixMode = NonNullable<IndexSourceConfig['contextualPrefixMode']>;
 
@@ -124,6 +125,24 @@ function sanitizePrefix(text: string): string {
     .slice(0, MAX_PREFIX_CHARS);
 }
 
+function providerTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.MNEMIS_PROVIDER_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error('provider_timeout')),
+    providerTimeoutMs(),
+  );
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 class AnthropicContextClient {
   readonly model: string;
   private readonly apiKey: string;
@@ -138,7 +157,7 @@ class AnthropicContextClient {
     chunk: IndexChunk;
     maxChunkChars: number;
   }): Promise<{ prefix: string; usage: ContextualPrefixUsage }> {
-    const res = await fetch(ANTHROPIC_URL, {
+    const res = await fetchWithTimeout(ANTHROPIC_URL, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

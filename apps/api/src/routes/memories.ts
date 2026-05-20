@@ -12,7 +12,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { ApiError } from '../errors.ts';
-import { requireScopes } from '../middleware/auth.ts';
+import { hasScope, requireScopes, scopeError } from '../middleware/auth.ts';
 import {
   createMemory,
   deleteMemory,
@@ -22,6 +22,7 @@ import {
   toDto,
 } from '../services/memories.ts';
 import { type SearchHit, searchHybrid, searchKeyword } from '../services/search.ts';
+import { recordUsage } from '../services/usage.ts';
 import {
   createMemorySchema,
   listMemoriesQuerySchema,
@@ -54,12 +55,16 @@ memoriesRoutes.post('/search', requireScopes('search:read'), async (c) => {
   });
   const input = searchBodySchema.parse(body);
   const include = new Set(input.include ?? []);
+  if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
+    return c.json(scopeError(['memories:embedding']), 403);
+  }
   const hits = await searchKeyword(
     auth.workspaceId,
     input.query,
     { kind: input.kind, tags: input.tags, directory: input.directory },
     input.limit,
   );
+  await recordUsage(c, 'search', 1, { target: 'memories', mode: 'keyword', count: hits.length });
   return c.json({
     query: input.query,
     mode: 'keyword',
@@ -75,12 +80,22 @@ memoriesRoutes.post('/semantic-search', requireScopes('search:read'), async (c) 
   });
   const input = searchBodySchema.parse(body);
   const include = new Set(input.include ?? []);
+  if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
+    return c.json(scopeError(['memories:embedding']), 403);
+  }
   const result = await searchHybrid(
     auth.workspaceId,
     input.query,
     { kind: input.kind, tags: input.tags, directory: input.directory },
     input.limit,
   );
+  await recordUsage(c, 'search', 1, {
+    target: 'memories',
+    mode: result.used_vector ? 'hybrid_rrf' : 'keyword_only',
+    count: result.hits.length,
+    embedding_tokens: result.embedding_tokens,
+    reranker_tokens: result.reranker_tokens,
+  });
   return c.json({
     query: input.query,
     mode: result.used_vector ? 'hybrid_rrf' : 'keyword_only',
@@ -101,6 +116,7 @@ memoriesRoutes.post('/', requireScopes('memories:write'), async (c) => {
   });
   const input = createMemorySchema.parse(body);
   const created = await createMemory(auth.workspaceId, input);
+  await recordUsage(c, 'save', 1, { memory_id: created.id, kind: created.kind });
   return c.json({ data: toDto(created, { includeLineage: true }) }, 201);
 });
 
@@ -108,6 +124,9 @@ memoriesRoutes.get('/', requireScopes('memories:read'), async (c) => {
   const auth = c.get('auth');
   const query = listMemoriesQuerySchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const include = parseInclude(query.include);
+  if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
+    return c.json(scopeError(['memories:embedding']), 403);
+  }
 
   const result = await listMemories(auth.workspaceId, {
     kind: query.kind,
@@ -141,6 +160,9 @@ memoriesRoutes.get('/:id', requireScopes('memories:read'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
   const include = parseInclude(c.req.query('include'));
+  if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
+    return c.json(scopeError(['memories:embedding']), 403);
+  }
   const memory = await getMemory(auth.workspaceId, id);
   return c.json({
     data: toDto(memory, {
@@ -165,6 +187,9 @@ memoriesRoutes.delete('/:id', requireScopes('memories:delete'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
   const permanent = c.req.query('permanent') === 'true';
+  if (permanent && !hasScope(auth.scopes, 'memories:delete:permanent')) {
+    return c.json(scopeError(['memories:delete:permanent']), 403);
+  }
   await deleteMemory(auth.workspaceId, id, { permanent });
   return c.body(null, 204);
 });

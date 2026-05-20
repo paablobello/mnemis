@@ -121,8 +121,8 @@ export const apiKeys = pgTable(
       .references(() => workspaces.id, { onDelete: 'cascade' })
       .notNull(),
     name: text('name').notNull(),
-    prefix: text('prefix').notNull(), // first 8 chars, shown in UI
-    keyHash: text('key_hash').notNull(), // sha256 of full key
+    prefix: text('prefix').notNull(), // first 11 chars, shown in UI
+    keyHash: text('key_hash').notNull(), // hmac_sha256(key) for new keys; legacy sha256 is still accepted
     scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -338,6 +338,7 @@ export const usageEvents = pgTable(
       t.workspaceId,
       t.occurredAt,
     ),
+    apiKeyOccurredIdx: index('usage_events_api_key_occurred_idx').on(t.apiKeyId, t.occurredAt),
     kindIdx: index('usage_events_kind_idx').on(t.kind),
   }),
 );

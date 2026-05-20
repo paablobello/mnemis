@@ -1,17 +1,26 @@
+import { isIP } from 'node:net';
+import { delimiter, isAbsolute, relative, resolve } from 'node:path';
 import { type Job, type Source, chunks, sources } from '@mnemis/db';
 import { type SQL, and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import { ApiError } from '../errors.ts';
+import { hasScope } from '../middleware/auth.ts';
 import type { CreateSourceInput, SourceKindInput } from '../validators/sources.ts';
 import { getActiveGitHubInstallation } from './github-installations.ts';
-import { type JobDto, createJob, jobToDto, latestJobForSource } from './jobs.ts';
+import {
+  type JobDto,
+  createJob,
+  jobToDto,
+  latestJobForSource,
+  sanitizeOperationalError,
+} from './jobs.ts';
 
 export interface SourceDto {
   id: string;
   kind: SourceKindInput;
   identifier: string;
   display_name: string;
-  config: unknown;
+  config: Record<string, unknown>;
   last_indexed_at: string | null;
   last_change_at: string | null;
   index_strategy: string;
@@ -28,19 +37,44 @@ export interface SourceStatusDto {
   latest_job: JobDto | null;
 }
 
+function redactSourceConfig(config: unknown): Record<string, unknown> {
+  const raw = asRecord(config);
+  const safe: Record<string, unknown> = {};
+  for (const key of [
+    'branch',
+    'includePaths',
+    'excludePaths',
+    'focusInstructions',
+    'maxFileBytes',
+    'chunkMaxChars',
+    'chunkOverlapLines',
+    'contextualPrefixMode',
+    'contextualPrefixMaxDocumentChars',
+    'contextualPrefixMaxChunkChars',
+    'maxPages',
+    'respectRobots',
+    'docsCrawler',
+  ]) {
+    if (raw[key] !== undefined) safe[key] = raw[key];
+  }
+  if (raw.githubInstallationId !== undefined) safe.githubInstallationLinked = true;
+  if (raw.localPath !== undefined) safe.localPathConfigured = true;
+  return safe;
+}
+
 export function sourceToDto(source: Source): SourceDto {
   return {
     id: source.id,
     kind: source.kind as SourceKindInput,
     identifier: source.identifier,
     display_name: source.displayName,
-    config: source.config,
+    config: redactSourceConfig(source.config),
     last_indexed_at: source.lastIndexedAt?.toISOString() ?? null,
     last_change_at: source.lastChangeAt?.toISOString() ?? null,
     index_strategy: source.indexStrategy,
     cron_schedule: source.cronSchedule,
     status: source.status,
-    status_message: source.statusMessage,
+    status_message: sanitizeOperationalError(source.statusMessage),
     created_at: source.createdAt.toISOString(),
     updated_at: source.updatedAt.toISOString(),
   };
@@ -78,13 +112,106 @@ function localSourcesEnabled(): boolean {
   return process.env.MNEMIS_ALLOW_LOCAL_SOURCES === 'true';
 }
 
-async function validateSourceConfig(workspaceId: string, input: CreateSourceInput): Promise<void> {
-  const config = asRecord(input.config);
-  if (typeof config.localPath === 'string' && !localSourcesEnabled()) {
+function localSourceAllowedByMode(): boolean {
+  return process.env.MNEMIS_MODE !== 'cloud';
+}
+
+function localSourceRoots(): string[] {
+  return (process.env.MNEMIS_LOCAL_SOURCE_ROOTS ?? '')
+    .split(delimiter)
+    .map((root) => root.trim())
+    .filter(Boolean)
+    .map((root) => resolve(root));
+}
+
+function isPathUnderRoot(path: string, root: string): boolean {
+  const resolvedPath = resolve(path);
+  const relativePath = relative(root, resolvedPath);
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function validateLocalPath(localPath: string, scopes: readonly string[]): void {
+  if (!localSourceAllowedByMode()) {
+    throw ApiError.badRequest(
+      'local_sources_disabled',
+      'config.localPath is not allowed when MNEMIS_MODE=cloud',
+    );
+  }
+  if (!localSourcesEnabled()) {
     throw ApiError.badRequest(
       'local_sources_disabled',
       'config.localPath is only allowed when MNEMIS_ALLOW_LOCAL_SOURCES=true',
     );
+  }
+  if (!hasScope(scopes, 'sources:local')) {
+    throw ApiError.forbidden('API key requires sources:local to register localPath sources');
+  }
+  const roots = localSourceRoots();
+  if (roots.length === 0) {
+    throw ApiError.badRequest(
+      'local_source_roots_required',
+      'MNEMIS_LOCAL_SOURCE_ROOTS must allowlist localPath roots',
+    );
+  }
+  if (!roots.some((root) => isPathUnderRoot(localPath, root))) {
+    throw ApiError.badRequest(
+      'local_source_path_not_allowed',
+      'config.localPath must be under MNEMIS_LOCAL_SOURCE_ROOTS',
+    );
+  }
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const parts = ip.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a === 0
+  );
+}
+
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  if (host === 'localhost' || host.endsWith('.localhost') || host === 'metadata.google.internal') {
+    return true;
+  }
+  const version = isIP(host);
+  if (version === 4) return isPrivateIpv4(host);
+  if (version === 6)
+    return (
+      host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')
+    );
+  return false;
+}
+
+function validateDocsIdentifier(identifier: string): void {
+  if (process.env.MNEMIS_MODE !== 'cloud') return;
+  const url = new URL(identifier);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw ApiError.badRequest('docs_url_not_allowed', 'docs_site identifier must be http or https');
+  }
+  if (isPrivateHost(url.hostname)) {
+    throw ApiError.badRequest(
+      'docs_url_not_allowed',
+      'docs_site identifier cannot target private hosts in cloud mode',
+    );
+  }
+}
+
+async function validateSourceConfig(
+  workspaceId: string,
+  input: CreateSourceInput,
+  scopes: readonly string[],
+): Promise<void> {
+  const config = asRecord(input.config);
+  if (input.kind === 'docs_site') validateDocsIdentifier(input.identifier);
+  if (typeof config.localPath === 'string') {
+    validateLocalPath(config.localPath, scopes);
   }
 
   if (input.kind !== 'github_repo') return;
@@ -117,10 +244,11 @@ async function enqueueSourceJob(
 export async function createSource(
   workspaceId: string,
   input: CreateSourceInput,
+  options: { scopes?: readonly string[] } = {},
 ): Promise<{ source: Source; job: Job | null }> {
   const db = getDb();
   const identifier = normalizeIdentifier(input.kind, input.identifier);
-  await validateSourceConfig(workspaceId, input);
+  await validateSourceConfig(workspaceId, input, options.scopes ?? []);
 
   const existing = await db
     .select({ id: sources.id })

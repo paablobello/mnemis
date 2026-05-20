@@ -1,4 +1,4 @@
-import { MnemisApiError } from './errors.ts';
+import { MnemisApiError, MnemisNetworkError, MnemisTimeoutError } from './errors.ts';
 import type {
   ChunkSearchInput,
   ChunkSearchResponse,
@@ -23,6 +23,8 @@ export interface MnemisClientOptions {
   apiUrl: string;
   apiKey: string;
   fetch?: typeof fetch;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 interface RequestOptions {
@@ -53,15 +55,24 @@ function createRawClient(options: MnemisClientOptions): RawClient {
     async request<T>({ method, path, body, query }: RequestOptions): Promise<T> {
       const fullPath = buildPath(path, query);
       const url = `${baseUrl}${fullPath.startsWith('/') ? fullPath : `/${fullPath}`}`;
-      const response = await fetcher(url, {
-        method,
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${options.apiKey}`,
-          accept: 'application/json',
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+      const { signal, cleanup } = requestSignal(options);
+      let response: Response;
+      try {
+        response = await fetcher(url, {
+          method,
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${options.apiKey}`,
+            accept: 'application/json',
+          },
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+          signal,
+        });
+      } catch (err) {
+        throw mapFetchError(err);
+      } finally {
+        cleanup();
+      }
 
       const text = await response.text();
       const json = text ? safeJson(text) : null;
@@ -79,6 +90,42 @@ function createRawClient(options: MnemisClientOptions): RawClient {
       return (json ?? {}) as T;
     },
   };
+}
+
+function requestSignal(options: {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}): { signal?: AbortSignal; cleanup: () => void } {
+  if (!options.timeoutMs && !options.signal) return { cleanup: () => {} };
+
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const abortFromParent = (): void => controller.abort(options.signal?.reason);
+
+  if (options.signal) {
+    if (options.signal.aborted) abortFromParent();
+    else options.signal.addEventListener('abort', abortFromParent, { once: true });
+  }
+  if (options.timeoutMs) {
+    timeout = setTimeout(() => controller.abort(new MnemisTimeoutError()), options.timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timeout) clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortFromParent);
+    },
+  };
+}
+
+function mapFetchError(err: unknown): Error {
+  if (err instanceof MnemisTimeoutError) return err;
+  if (err instanceof DOMException && err.name === 'AbortError') return new MnemisTimeoutError();
+  if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
+    return new MnemisTimeoutError();
+  }
+  return new MnemisNetworkError('Mnemis API network request failed', err);
 }
 
 function safeJson(text: string): unknown {
@@ -274,14 +321,25 @@ export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
       },
       async streamStatus(id, onEvent, opts = {}) {
         const url = `${baseUrl}/v1/sources/${encodeURIComponent(id)}/status/stream`;
-        const response = await fetcher(url, {
-          method: 'GET',
-          headers: {
-            accept: 'text/event-stream',
-            authorization: `Bearer ${options.apiKey}`,
-          },
-          signal: opts.signal,
+        const { signal, cleanup } = requestSignal({
+          timeoutMs: options.timeoutMs,
+          signal: opts.signal ?? options.signal,
         });
+        let response: Response;
+        try {
+          response = await fetcher(url, {
+            method: 'GET',
+            headers: {
+              accept: 'text/event-stream',
+              authorization: `Bearer ${options.apiKey}`,
+            },
+            signal,
+          });
+        } catch (err) {
+          throw mapFetchError(err);
+        } finally {
+          cleanup();
+        }
         if (!response.ok || !response.body) {
           const text = await response.text().catch(() => '');
           throw new MnemisApiError(

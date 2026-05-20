@@ -1,6 +1,6 @@
 export { createMnemisClient } from './client.ts';
 export type { MnemisClient, MnemisClientOptions, StreamStatusEvent } from './client.ts';
-export { MnemisApiError } from './errors.ts';
+export { MnemisApiError, MnemisNetworkError, MnemisTimeoutError } from './errors.ts';
 export type {
   ChunkSearchCitation,
   ChunkSearchInput,

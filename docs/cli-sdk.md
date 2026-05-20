@@ -60,6 +60,7 @@ bun run cli memory list --kind fact --tag architecture
 bun run cli memory search "indexer queue"
 bun run cli memory update <memory-id> --tag architecture --no-ttl
 bun run cli memory delete <memory-id>
+bun run cli memory delete <memory-id> --permanent --yes
 bun run cli status
 ```
 
@@ -140,10 +141,14 @@ console.log(source.data.id, results.count, memory.id, memories.total);
 
 The SDK throws `MnemisApiError` for non-2xx responses and preserves the HTTP
 status, API error code, message, and response details.
+Set `timeoutMs` on `createMnemisClient` to bound API calls; timeouts throw
+`MnemisTimeoutError`, while transport failures throw `MnemisNetworkError`.
 
 `config.localPath` is intentionally disabled by default because it lets API
-users ask the worker to read local server files. Use it only in trusted local
-development with `MNEMIS_ALLOW_LOCAL_SOURCES=true`.
+users ask the worker to read local server files. It requires all of:
+`MNEMIS_ALLOW_LOCAL_SOURCES=true`, `MNEMIS_LOCAL_SOURCE_ROOTS` allowlisting the
+path root, and an API key with `sources:local`. Keep it off for hosted/cloud
+deployments.
 
 Docs crawling defaults to `docsCrawler: 'auto'`: it uses Firecrawl when
 `FIRECRAWL_API_KEY` is configured and otherwise falls back to the native

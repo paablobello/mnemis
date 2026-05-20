@@ -1,6 +1,11 @@
-import { createHash } from 'node:crypto';
-import { apiKeys, workspaces } from '@mnemis/db';
-import { eq } from 'drizzle-orm';
+import {
+  apiKeyHash,
+  apiKeyHashCandidates,
+  apiKeys,
+  isLegacyApiKeyHash,
+  workspaces,
+} from '@mnemis/db';
+import { eq, inArray } from 'drizzle-orm';
 import type { MiddlewareHandler } from 'hono';
 import { getDb } from '../db.ts';
 
@@ -14,10 +19,6 @@ declare module 'hono' {
   interface ContextVariableMap {
     auth: AuthContext;
   }
-}
-
-function hashKey(key: string): string {
-  return createHash('sha256').update(key).digest('hex');
 }
 
 function extractKey(
@@ -39,20 +40,28 @@ export function hasScope(grantedScopes: readonly string[], required: string): bo
   return grantedScopes.some((scope) => scopeMatches(scope, required));
 }
 
+export function hasAnyScope(
+  grantedScopes: readonly string[],
+  required: readonly string[],
+): boolean {
+  return required.some((scope) => hasScope(grantedScopes, scope));
+}
+
+export function scopeError(required: readonly string[]) {
+  return {
+    error: 'insufficient_scope',
+    message: 'API key does not have the required scope',
+    required_scopes: required,
+  };
+}
+
 export function requireScopes(...required: string[]): MiddlewareHandler {
   return async (c, next) => {
     const auth = c.get('auth');
     const allowed = required.some((scope) => hasScope(auth.scopes, scope));
 
     if (!allowed) {
-      return c.json(
-        {
-          error: 'insufficient_scope',
-          message: 'API key does not have the required scope',
-          required_scopes: required,
-        },
-        403,
-      );
+      return c.json(scopeError(required), 403);
     }
 
     await next();
@@ -71,11 +80,12 @@ export const apiKeyAuth: MiddlewareHandler = async (c, next) => {
   }
 
   const db = getDb();
-  const keyHash = hashKey(raw);
+  const keyHashes = apiKeyHashCandidates(raw, process.env.INTERNAL_AUTH_SECRET);
   const [row] = await db
     .select({
       id: apiKeys.id,
       workspaceId: apiKeys.workspaceId,
+      keyHash: apiKeys.keyHash,
       scopes: apiKeys.scopes,
       revokedAt: apiKeys.revokedAt,
       expiresAt: apiKeys.expiresAt,
@@ -83,7 +93,7 @@ export const apiKeyAuth: MiddlewareHandler = async (c, next) => {
     })
     .from(apiKeys)
     .innerJoin(workspaces, eq(workspaces.id, apiKeys.workspaceId))
-    .where(eq(apiKeys.keyHash, keyHash))
+    .where(inArray(apiKeys.keyHash, keyHashes))
     .limit(1);
 
   if (!row) {
@@ -103,8 +113,12 @@ export const apiKeyAuth: MiddlewareHandler = async (c, next) => {
   });
 
   // Best-effort last_used_at update — don't block the request on it.
+  const nextKeyHash =
+    isLegacyApiKeyHash(row.keyHash) && process.env.INTERNAL_AUTH_SECRET
+      ? apiKeyHash(raw, process.env.INTERNAL_AUTH_SECRET)
+      : row.keyHash;
   db.update(apiKeys)
-    .set({ lastUsedAt: new Date() })
+    .set({ lastUsedAt: new Date(), keyHash: nextKeyHash })
     .where(eq(apiKeys.id, row.id))
     .catch((err) => {
       console.warn('failed to update api key last_used_at', err);

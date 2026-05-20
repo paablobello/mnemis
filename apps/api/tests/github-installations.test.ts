@@ -168,7 +168,8 @@ describe('GitHub App installations API', () => {
     });
     assert.equal(accepted.status, 201);
     const acceptedJson = await accepted.json();
-    assert.equal(acceptedJson.data.config.githubInstallationId, INSTALLATION_ID);
+    assert.equal(acceptedJson.data.config.githubInstallationLinked, true);
+    assert.equal(acceptedJson.data.config.githubInstallationId, undefined);
 
     const rejected = await app.request('/v1/sources', {
       method: 'POST',

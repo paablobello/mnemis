@@ -119,7 +119,7 @@ export const sourceSearchSchema = z
     include: z
       .array(z.enum(['content', 'metadata']))
       .optional()
-      .default(['content']),
+      .default([]),
   })
   .strict();
 export type SourceSearchInput = z.infer<typeof sourceSearchSchema>;

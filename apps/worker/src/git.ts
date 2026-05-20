@@ -3,6 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const DEFAULT_GIT_TIMEOUT_MS = 5 * 60_000;
+
+function gitTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.MNEMIS_GIT_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
+}
+
 function runGit(args: string[], options: SpawnOptionsWithoutStdio = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
@@ -12,14 +19,22 @@ function runGit(args: string[], options: SpawnOptionsWithoutStdio = {}): Promise
 
     let stdout = '';
     let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error(`git ${args[0]} timed out after ${gitTimeoutMs()}ms`));
+    }, gitTimeoutMs());
     child.stdout.on('data', (data) => {
       stdout += String(data);
     });
     child.stderr.on('data', (data) => {
       stderr += String(data);
     });
-    child.on('error', reject);
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
     child.on('close', (code) => {
+      clearTimeout(timeout);
       if (code === 0) {
         resolve(stdout);
         return;

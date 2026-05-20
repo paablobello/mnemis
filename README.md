@@ -5,7 +5,7 @@
 Mnemis gives AI coding agents (Cursor, Claude Code, Codex, etc.) **persistent memory** and **fresh, cited retrieval over your repos and docs** — through a single MCP server, REST API, and CLI.
 
 **Status**: alpha (v0.1.0). The API, worker, MCP server, TypeScript SDK and CLI are
-all present and exercised by 148 tests. Local Bun development, production
+all present and exercised by the test suite. Local Bun development, production
 docker-compose and `mnemis init` for Cursor/Claude Code/Windsurf/Zed are
 shipped. Hosted cloud UX is the next milestone.
 
@@ -56,9 +56,8 @@ cp .env.prod.example .env.prod
 # edit POSTGRES_PASSWORD, INTERNAL_AUTH_SECRET and any provider keys you need
 docker compose -f docker/docker-compose.prod.yml --env-file .env.prod up -d
 
-# one-off: push the schema (or run migrations)
-docker compose -f docker/docker-compose.prod.yml --env-file .env.prod \
-  exec api bun run apps/api/src/index.ts --help  # warm the image
+# one-off before first boot: apply the schema inside the Compose network
+docker compose -f docker/docker-compose.prod.yml --env-file .env.prod --profile tools run --rm migrate
 ```
 
 The API listens on `${API_PORT}` (default 8787); both api and worker share

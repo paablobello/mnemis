@@ -13,9 +13,10 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import { apiKeys, createDatabase, memories, users, workspaces } from '@mnemis/db';
+import { apiKeyHash, apiKeys, createDatabase, memories, users, workspaces } from '@mnemis/db';
 import { eq, sql } from 'drizzle-orm';
 import { createApp } from '../src/app.ts';
+import { resetRateLimitForTests } from '../src/middleware/rate-limit.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL required for integration tests');
@@ -31,6 +32,11 @@ const RAW_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const KEY_HASH = createHash('sha256').update(RAW_KEY).digest('hex');
 const READ_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const READ_ONLY_HASH = createHash('sha256').update(READ_ONLY_KEY).digest('hex');
+const HMAC_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
+const DELETE_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
+const DELETE_ONLY_HASH = createHash('sha256').update(DELETE_ONLY_KEY).digest('hex');
+const ORIGINAL_MAX_BODY_BYTES = process.env.MNEMIS_MAX_BODY_BYTES;
+const ORIGINAL_RATE_LIMIT = process.env.MNEMIS_RATE_LIMIT_PER_MINUTE;
 
 let workspaceId = '';
 let userId = '';
@@ -70,9 +76,34 @@ before(async () => {
     prefix: READ_ONLY_KEY.slice(0, 11),
     scopes: ['memories:read'],
   });
+  await db.insert(apiKeys).values({
+    workspaceId,
+    name: 'hmac-read',
+    keyHash: apiKeyHash(HMAC_KEY, process.env.INTERNAL_AUTH_SECRET),
+    prefix: HMAC_KEY.slice(0, 11),
+    scopes: ['memories:read'],
+  });
+  await db.insert(apiKeys).values({
+    workspaceId,
+    name: 'delete-only',
+    keyHash: DELETE_ONLY_HASH,
+    prefix: DELETE_ONLY_KEY.slice(0, 11),
+    scopes: ['memories:delete'],
+  });
 });
 
 after(async () => {
+  resetRateLimitForTests();
+  if (ORIGINAL_MAX_BODY_BYTES === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_MAX_BODY_BYTES');
+  } else {
+    process.env.MNEMIS_MAX_BODY_BYTES = ORIGINAL_MAX_BODY_BYTES;
+  }
+  if (ORIGINAL_RATE_LIMIT === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_RATE_LIMIT_PER_MINUTE');
+  } else {
+    process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = ORIGINAL_RATE_LIMIT;
+  }
   // workspaces cascades to api_keys + memories
   await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
   await db.delete(users).where(eq(users.id, userId));
@@ -98,6 +129,11 @@ describe('auth', () => {
     assert.equal(res.status, 200);
   });
 
+  it('accepts HMAC-derived API key hashes', async () => {
+    const res = await app.request('/v1/memories', { headers: headersFor(HMAC_KEY) });
+    assert.equal(res.status, 200);
+  });
+
   it('rejects keys without the required scope', async () => {
     const write = await app.request('/v1/memories', {
       method: 'POST',
@@ -115,6 +151,43 @@ describe('auth', () => {
 
     const read = await app.request('/v1/memories', { headers: headersFor(READ_ONLY_KEY) });
     assert.equal(read.status, 200);
+  });
+
+  it('rejects oversized bodies before auth and rate limits authenticated keys', async () => {
+    process.env.MNEMIS_MAX_BODY_BYTES = '8';
+    const oversizedBody = JSON.stringify({ body: 'too large' });
+    const oversized = await app.request('/v1/memories', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(oversizedBody)),
+      },
+      body: oversizedBody,
+    });
+    assert.equal(oversized.status, 413);
+    const oversizedJson = await oversized.json();
+    assert.equal(oversizedJson.error, 'payload_too_large');
+
+    resetRateLimitForTests();
+    process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = '1';
+    const first = await app.request('/v1/memories', { headers: headers() });
+    const second = await app.request('/v1/memories', { headers: headers() });
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 429);
+    const rateJson = await second.json();
+    assert.equal(rateJson.error, 'rate_limited');
+
+    resetRateLimitForTests();
+    if (ORIGINAL_MAX_BODY_BYTES === undefined) {
+      Reflect.deleteProperty(process.env, 'MNEMIS_MAX_BODY_BYTES');
+    } else {
+      process.env.MNEMIS_MAX_BODY_BYTES = ORIGINAL_MAX_BODY_BYTES;
+    }
+    if (ORIGINAL_RATE_LIMIT === undefined) {
+      Reflect.deleteProperty(process.env, 'MNEMIS_RATE_LIMIT_PER_MINUTE');
+    } else {
+      process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = ORIGINAL_RATE_LIMIT;
+    }
   });
 });
 
@@ -171,6 +244,16 @@ describe('memories CRUD', () => {
     assert.ok(json.data.lineage);
   });
 
+  it('requires memories:embedding before returning stored vectors', async () => {
+    const res = await app.request(`/v1/memories/${id}?include=embedding`, {
+      headers: headersFor(READ_ONLY_KEY),
+    });
+    assert.equal(res.status, 403);
+    const json = await res.json();
+    assert.equal(json.error, 'insufficient_scope');
+    assert.deepEqual(json.required_scopes, ['memories:embedding']);
+  });
+
   it('GET 404 on unknown id', async () => {
     const res = await app.request(`/v1/memories/${randomUUID()}`, { headers: headers() });
     assert.equal(res.status, 404);
@@ -224,6 +307,35 @@ describe('memories CRUD', () => {
     const archJson = await archived.json();
     assert.equal(archJson.total, 1);
     assert.ok(archJson.items[0].archived_at !== null);
+  });
+
+  it('requires explicit permanent-delete scope for hard deletes', async () => {
+    const create = await app.request('/v1/memories', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        kind: 'fact',
+        title: 'hard delete guard',
+        summary: 'hard delete guard',
+        body: 'permanent delete should require a narrower scope',
+      }),
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json();
+
+    const blocked = await app.request(`/v1/memories/${created.data.id}?permanent=true`, {
+      method: 'DELETE',
+      headers: headersFor(DELETE_ONLY_KEY),
+    });
+    assert.equal(blocked.status, 403);
+    const blockedJson = await blocked.json();
+    assert.deepEqual(blockedJson.required_scopes, ['memories:delete:permanent']);
+
+    const allowed = await app.request(`/v1/memories/${created.data.id}?permanent=true`, {
+      method: 'DELETE',
+      headers: headers(),
+    });
+    assert.equal(allowed.status, 204);
   });
 });
 

@@ -19,7 +19,8 @@
     "post-migrate": "node --experimental-strip-types scripts/run-sql-dir.ts post",
     "bootstrap": "node --experimental-strip-types scripts/bootstrap.ts",
     "studio": "drizzle-kit studio",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.36.0",

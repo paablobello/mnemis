@@ -1,33 +1,43 @@
-# Mnemis API server image.
-# Single-stage: Bun runs TypeScript natively, so we install deps and run
-# directly from source. Production environments should mount a tagged build.
-FROM oven/bun:1.3.1-alpine
+FROM oven/bun:1.3.1-alpine AS builder
 
 WORKDIR /app
 
-# Install workspace deps. The lockfile + workspace package.jsons are enough.
 COPY package.json bun.lock turbo.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
+COPY apps/cli/package.json apps/cli/
+COPY apps/mcp/package.json apps/mcp/
+COPY apps/worker/package.json apps/worker/
 COPY packages/db/package.json packages/db/
 COPY packages/embeddings/package.json packages/embeddings/
+COPY packages/eval/package.json packages/eval/
 COPY packages/indexer/package.json packages/indexer/
 COPY packages/sdk/package.json packages/sdk/
 
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile
 
-# Copy source. .dockerignore prunes node_modules / dist / .turbo so the
-# install step's deps are not overwritten.
 COPY apps/api ./apps/api
 COPY packages/db ./packages/db
 COPY packages/embeddings ./packages/embeddings
 COPY packages/indexer ./packages/indexer
 COPY packages/sdk ./packages/sdk
 
+RUN bun --filter @mnemis/api build
+
+FROM oven/bun:1.3.1-alpine AS runtime
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates && addgroup -S mnemis && adduser -S mnemis -G mnemis
+
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+
 ENV NODE_ENV=production
 ENV API_HOST=0.0.0.0
 EXPOSE 8787
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=4 \
-  CMD wget -qO- http://localhost:8787/health > /dev/null 2>&1 || exit 1
+  CMD bun -e "fetch('http://localhost:8787/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["bun", "run", "apps/api/src/index.ts"]
+USER mnemis
+
+CMD ["bun", "run", "apps/api/dist/index.js"]

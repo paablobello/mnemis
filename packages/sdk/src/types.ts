@@ -128,7 +128,7 @@ export interface SourceDto {
   kind: SourceKind;
   identifier: string;
   display_name: string;
-  config: unknown;
+  config: Record<string, unknown>;
   last_indexed_at: string | null;
   last_change_at: string | null;
   index_strategy: IndexStrategy;

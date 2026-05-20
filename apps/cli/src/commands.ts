@@ -65,7 +65,7 @@ Usage:
                            [--archive|--unarchive] [--metadata-json <json>]
   mnemis memory archive <id>
   mnemis memory restore <id>
-  mnemis memory delete <id> [--permanent]
+  mnemis memory delete <id> [--permanent --yes]
 
   mnemis sources list [--kind <k>] [--status <s>] [--limit N]
   mnemis sources get <id>
@@ -632,12 +632,15 @@ export async function cmdMemoryDelete(
 ): Promise<CommandResult> {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: { permanent: { type: 'boolean' } },
+    options: { permanent: { type: 'boolean' }, yes: { type: 'boolean' } },
     allowPositionals: true,
     strict: true,
   });
   const id = positionals[0];
   if (!id) return fail('Expected <memory_id>');
+  if (values.permanent && !values.yes) {
+    return fail('Permanent delete requires --yes');
+  }
   const client = await services.client();
   await client.memories.remove(id, { permanent: values.permanent });
   out(values.permanent ? `Permanently deleted memory ${id}` : `Deleted memory ${id}`);

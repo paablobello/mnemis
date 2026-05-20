@@ -5,6 +5,7 @@ const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
 const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
 const MAX_BATCH = 128;
 const CACHE_LIMIT = 2_000;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 
 export type VoyageModel = 'voyage-3.5-large' | 'voyage-code-3';
 export type VoyageRerankModel = 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
@@ -106,7 +107,7 @@ export class EmbeddingsClient {
     inputType: VoyageInputType,
     model: VoyageModel,
   ): Promise<{ embeddings: number[][]; tokens: number }> {
-    const res = await fetch(VOYAGE_URL, {
+    const res = await fetchWithTimeout(VOYAGE_URL, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -157,6 +158,24 @@ export class EmbeddingsClient {
   }
 }
 
+function providerTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.MNEMIS_PROVIDER_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error('provider_timeout')),
+    providerTimeoutMs(),
+  );
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export class VoyageRerankerClient {
   readonly defaultModel: VoyageRerankModel;
   private readonly apiKey: string;
@@ -172,7 +191,7 @@ export class VoyageRerankerClient {
     opts: { model?: VoyageRerankModel; topK?: number } = {},
   ): Promise<RerankResult> {
     const model = opts.model ?? this.defaultModel;
-    const res = await fetch(VOYAGE_RERANK_URL, {
+    const res = await fetchWithTimeout(VOYAGE_RERANK_URL, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

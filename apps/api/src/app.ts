@@ -4,6 +4,8 @@ import { secureHeaders } from 'hono/secure-headers';
 import { ZodError } from 'zod';
 import { ApiError } from './errors.ts';
 import { apiKeyAuth } from './middleware/auth.ts';
+import { bodySizeLimit } from './middleware/body-limit.ts';
+import { rateLimit } from './middleware/rate-limit.ts';
 import { admin } from './routes/admin.ts';
 import { health } from './routes/health.ts';
 import { v1 } from './routes/v1.ts';
@@ -37,7 +39,9 @@ export function createApp(opts: AppOptions = {}): Hono {
 
   app.route('/v1/webhooks', webhooksRoutes);
 
+  app.use('/v1/*', bodySizeLimit);
   app.use('/v1/*', apiKeyAuth);
+  app.use('/v1/*', rateLimit);
   app.route('/v1', v1);
   app.route('/v1/admin', admin);
 

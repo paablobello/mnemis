@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { delimiter, isAbsolute, relative, resolve } from 'node:path';
 import { type Database, and, chunks, eq, inArray, jobs, sources, sql } from '@mnemis/db';
 import { type IndexSourceConfig, buildDocsSiteIndex, buildLocalSourceIndex } from '@mnemis/indexer';
 import { applyContextualPrefixes } from './contextual-prefix.ts';
@@ -82,6 +83,55 @@ function asConfig(value: unknown): IndexSourceConfig {
   };
 }
 
+function sanitizeOperationalError(error: unknown, max = 1_000): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s'"`]+/gi, '$1[redacted]')
+    .replace(/(x-api-key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
+    .replace(/(api[_-]?key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
+    .replace(/(token['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
+    .slice(0, max);
+}
+
+function localSourceRoots(): string[] {
+  return (process.env.MNEMIS_LOCAL_SOURCE_ROOTS ?? '')
+    .split(delimiter)
+    .map((root) => root.trim())
+    .filter(Boolean)
+    .map((root) => resolve(root));
+}
+
+function isPathUnderRoot(path: string, root: string): boolean {
+  const resolved = resolve(path);
+  const relativePath = relative(root, resolved);
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function assertLocalPathAllowed(localPath: string): void {
+  const env = loadEnv();
+  if (env.MNEMIS_MODE === 'cloud') {
+    throw new Error(
+      'local_sources_disabled: config.localPath is not allowed when MNEMIS_MODE=cloud',
+    );
+  }
+  if (!env.MNEMIS_ALLOW_LOCAL_SOURCES) {
+    throw new Error(
+      'local_sources_disabled: config.localPath is only allowed when MNEMIS_ALLOW_LOCAL_SOURCES=true',
+    );
+  }
+  const roots = localSourceRoots();
+  if (roots.length === 0) {
+    throw new Error(
+      'local_source_roots_required: MNEMIS_LOCAL_SOURCE_ROOTS must allowlist localPath roots',
+    );
+  }
+  if (!roots.some((root) => isPathUnderRoot(localPath, root))) {
+    throw new Error(
+      'local_source_path_not_allowed: config.localPath must be under MNEMIS_LOCAL_SOURCE_ROOTS',
+    );
+  }
+}
+
 async function updateJobProgress(
   db: Database,
   jobId: string,
@@ -113,6 +163,60 @@ export async function claimNextIndexJob(db: Database): Promise<string | null> {
   `);
 
   return rowsFrom<ClaimedJob>(result)[0]?.id ?? null;
+}
+
+export async function reapStaleIndexJobs(
+  db: Database,
+  options: { now?: Date; staleAfterMs?: number; maxAttempts?: number } = {},
+): Promise<{ requeued: number; failed: number }> {
+  const env = loadEnv();
+  const now = options.now ?? new Date();
+  const staleAfterMs = options.staleAfterMs ?? env.JOB_STALE_AFTER_MS;
+  const maxAttempts = options.maxAttempts ?? env.JOB_MAX_ATTEMPTS;
+  const staleBefore = new Date(now.getTime() - staleAfterMs);
+  const nowSql = sql`${now.toISOString()}::timestamptz`;
+  const staleBeforeSql = sql`${staleBefore.toISOString()}::timestamptz`;
+
+  const requeued = await db
+    .update(jobs)
+    .set({
+      status: 'queued',
+      startedAt: null,
+      scheduledAt: nowSql,
+      progress: { done: 0, total: null, current: 'requeued_after_stale_processing' },
+      error: 'job_requeued_after_stale_processing',
+    })
+    .where(
+      and(
+        eq(jobs.status, 'processing'),
+        inArray(jobs.kind, ['index_source', 'reindex_source']),
+        sql`${jobs.startedAt} IS NOT NULL`,
+        sql`${jobs.startedAt} <= ${staleBeforeSql}`,
+        sql`${jobs.attempts} < ${maxAttempts}`,
+      ),
+    )
+    .returning({ id: jobs.id });
+
+  const failed = await db
+    .update(jobs)
+    .set({
+      status: 'failed',
+      completedAt: nowSql,
+      progress: { done: 0, total: null, current: 'failed_stale_max_attempts' },
+      error: 'job_failed_after_stale_max_attempts',
+    })
+    .where(
+      and(
+        eq(jobs.status, 'processing'),
+        inArray(jobs.kind, ['index_source', 'reindex_source']),
+        sql`${jobs.startedAt} IS NOT NULL`,
+        sql`${jobs.startedAt} <= ${staleBeforeSql}`,
+        sql`${jobs.attempts} >= ${maxAttempts}`,
+      ),
+    )
+    .returning({ id: jobs.id });
+
+  return { requeued: requeued.length, failed: failed.length };
 }
 
 async function getClaimedJob(db: Database, jobId: string) {
@@ -178,11 +282,7 @@ async function buildSourceIndex(
   const config = asConfig(source.config);
 
   if (config.localPath) {
-    if (!loadEnv().MNEMIS_ALLOW_LOCAL_SOURCES) {
-      throw new Error(
-        'local_sources_disabled: config.localPath is only allowed when MNEMIS_ALLOW_LOCAL_SOURCES=true',
-      );
-    }
+    assertLocalPathAllowed(config.localPath);
     const index = await buildLocalSourceIndex(config.localPath, config);
     return { ...index, commitSha: null as string | null };
   }
@@ -371,7 +471,7 @@ async function markJobCompleted(
 }
 
 async function markJobFailed(db: Database, jobId: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = sanitizeOperationalError(error, 4_000);
   await db
     .update(jobs)
     .set({
@@ -480,7 +580,7 @@ export async function processIndexJob(
         .update(sources)
         .set({
           status: 'failed',
-          statusMessage: err instanceof Error ? err.message.slice(0, 1_000) : String(err),
+          statusMessage: sanitizeOperationalError(err),
         })
         .where(eq(sources.id, source.id));
     }
@@ -492,6 +592,7 @@ export async function processOneJob(
   db: Database,
   tokenStore: InstallationTokenStore = getDefaultTokenStore(),
 ): Promise<boolean> {
+  await reapStaleIndexJobs(db);
   const jobId = await claimNextIndexJob(db);
   if (!jobId) return false;
   await processIndexJob(db, jobId, tokenStore);

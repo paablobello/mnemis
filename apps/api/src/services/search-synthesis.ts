@@ -5,6 +5,7 @@ const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
 const MAX_CHUNK_CHARS = 2_500;
 const MAX_OUTPUT_TOKENS = 1_024;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 const SYSTEM_PROMPT = `You answer the user's question using only the provided sources.
 
 Rules:
@@ -79,6 +80,28 @@ export interface SynthesizeOptions {
   apiKey?: string;
 }
 
+function providerTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.MNEMIS_PROVIDER_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(
+  fetcher: typeof fetch,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error('provider_timeout')),
+    providerTimeoutMs(),
+  );
+  try {
+    return await fetcher(url, { ...init, signal: init.signal ?? controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function synthesizeAnswer(
   query: string,
   hits: ChunkSearchHit[],
@@ -91,7 +114,7 @@ export async function synthesizeAnswer(
   const model = options.model ?? DEFAULT_MODEL;
   const fetcher = options.fetch ?? fetch;
 
-  const res = await fetcher(ANTHROPIC_URL, {
+  const res = await fetchWithTimeout(fetcher, ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

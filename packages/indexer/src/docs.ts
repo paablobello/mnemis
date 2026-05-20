@@ -1,3 +1,5 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { chunkFiles } from './chunker.ts';
 import type { BuildIndexResult, IndexSourceConfig, LoadedFile } from './types.ts';
 
@@ -7,6 +9,7 @@ const USER_AGENT = 'MnemisIndexer/0.1 (+https://github.com/paablobello/mnemis)';
 const FIRECRAWL_DEFAULT_URL = 'https://api.firecrawl.dev/v2';
 const FIRECRAWL_POLL_INTERVAL_MS = 500;
 const FIRECRAWL_TIMEOUT_MS = 60_000;
+const FETCH_TIMEOUT_MS = 15_000;
 
 interface RobotsRules {
   disallow: string[];
@@ -40,9 +43,87 @@ interface FirecrawlDocument {
 
 function normalizeUrl(input: string): URL {
   const url = new URL(input);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('docs crawler only supports http and https URLs');
+  }
   url.hash = '';
   if (url.pathname === '') url.pathname = '/';
   return url;
+}
+
+function timeoutMs(envKey: string, fallback: number): number {
+  const configured = Number.parseInt(process.env[envKey] ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const parts = ip.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a === 0
+  );
+}
+
+function isPrivateIp(ip: string): boolean {
+  const version = isIP(ip);
+  if (version === 4) return isPrivateIpv4(ip);
+  if (version === 6) {
+    const lower = ip.toLowerCase();
+    return (
+      lower === '::1' ||
+      lower.startsWith('fc') ||
+      lower.startsWith('fd') ||
+      lower.startsWith('fe80')
+    );
+  }
+  return false;
+}
+
+function isCloudMode(): boolean {
+  return process.env.MNEMIS_MODE === 'cloud';
+}
+
+async function assertFetchAllowed(url: URL): Promise<void> {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('docs crawler only supports http and https URLs');
+  }
+  if (!isCloudMode()) return;
+
+  const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === 'metadata.google.internal'
+  ) {
+    throw new Error(`docs crawler blocked private host: ${url.hostname}`);
+  }
+  if (isPrivateIp(hostname)) {
+    throw new Error(`docs crawler blocked private address: ${url.hostname}`);
+  }
+
+  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  if (addresses.some((address) => isPrivateIp(address.address))) {
+    throw new Error(`docs crawler blocked private address: ${url.hostname}`);
+  }
+}
+
+async function fetchWithTimeout(url: URL | string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error('fetch_timeout')),
+    timeoutMs('MNEMIS_FETCH_TIMEOUT_MS', FETCH_TIMEOUT_MS),
+  );
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function toPathKey(url: URL): string {
@@ -211,7 +292,8 @@ function robotsAllows(url: URL, rules: RobotsRules): boolean {
 async function fetchText(
   url: URL,
 ): Promise<{ text: string; contentType: string; lastModified: Date | null } | null> {
-  const res = await fetch(url, { headers: { 'user-agent': USER_AGENT } });
+  await assertFetchAllowed(url);
+  const res = await fetchWithTimeout(url, { headers: { 'user-agent': USER_AGENT } });
   if (!res.ok) return null;
 
   const contentType = res.headers.get('content-type') ?? '';
@@ -322,7 +404,7 @@ export async function crawlDocsSiteNative(
 }
 
 function firecrawlApiUrl(): string {
-  return (process.env.FIRECRAWL_API_URL ?? FIRECRAWL_DEFAULT_URL).replace(/\/+$/, '');
+  return (process.env.FIRECRAWL_API_URL?.trim() || FIRECRAWL_DEFAULT_URL).replace(/\/+$/, '');
 }
 
 function firecrawlKey(): string | null {
@@ -336,7 +418,7 @@ function firecrawlPathPattern(path: string): string {
 }
 
 async function firecrawlJson<T>(url: string, init: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const res = await fetchWithTimeout(url, init);
   const text = await res.text();
   let json: unknown = null;
   try {

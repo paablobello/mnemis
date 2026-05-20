@@ -590,7 +590,12 @@ describe('search and memory commands', () => {
     );
     await capture(() => dispatch(['memory', 'archive', 'memory-1'], svc));
     await capture(() => dispatch(['memory', 'restore', 'memory-1'], svc));
-    await capture(() => dispatch(['memory', 'delete', 'memory-1', '--permanent'], svc));
+    const blocked = await capture(() =>
+      dispatch(['memory', 'delete', 'memory-1', '--permanent'], svc),
+    );
+    await capture(() => dispatch(['memory', 'delete', 'memory-1', '--permanent', '--yes'], svc));
+    assert.equal(blocked.result.exitCode, 1);
+    assert.match(blocked.stderr, /requires --yes/);
 
     assert.deepEqual(patches, [
       {

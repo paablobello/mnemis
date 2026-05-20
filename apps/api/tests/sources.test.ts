@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { after, before, describe, it } from 'node:test';
 import { apiKeys, chunks, createDatabase, sources, users, workspaces } from '@mnemis/db';
 import { resetEmbeddingsForTests } from '@mnemis/embeddings';
@@ -27,11 +28,16 @@ const READ_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const READ_ONLY_HASH = createHash('sha256').update(READ_ONLY_KEY).digest('hex');
 const SOURCES_ONLY_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
 const SOURCES_ONLY_HASH = createHash('sha256').update(SOURCES_ONLY_KEY).digest('hex');
+const SOURCES_WRITE_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
+const SOURCES_WRITE_HASH = createHash('sha256').update(SOURCES_WRITE_KEY).digest('hex');
+const SEARCH_READ_KEY = `mn_test_${randomBytes(20).toString('hex')}`;
+const SEARCH_READ_HASH = createHash('sha256').update(SEARCH_READ_KEY).digest('hex');
 const ORIGINAL_VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 const ORIGINAL_RERANK_PROVIDER = process.env.MNEMIS_RERANK_PROVIDER;
 const ORIGINAL_RERANK_MODEL = process.env.MNEMIS_RERANK_MODEL;
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_ALLOW_LOCAL_SOURCES = process.env.MNEMIS_ALLOW_LOCAL_SOURCES;
+const ORIGINAL_LOCAL_SOURCE_ROOTS = process.env.MNEMIS_LOCAL_SOURCE_ROOTS;
 
 function unsetVoyageKey(): void {
   Reflect.deleteProperty(process.env, 'VOYAGE_API_KEY');
@@ -89,6 +95,20 @@ before(async () => {
     prefix: SOURCES_ONLY_KEY.slice(0, 11),
     scopes: ['sources:*'],
   });
+  await db.insert(apiKeys).values({
+    workspaceId,
+    name: 'sources-write-no-local',
+    keyHash: SOURCES_WRITE_HASH,
+    prefix: SOURCES_WRITE_KEY.slice(0, 11),
+    scopes: ['sources:write'],
+  });
+  await db.insert(apiKeys).values({
+    workspaceId,
+    name: 'search-read-no-content',
+    keyHash: SEARCH_READ_HASH,
+    prefix: SEARCH_READ_KEY.slice(0, 11),
+    scopes: ['search:read'],
+  });
 
   const otherSlug = `${TEST_SLUG}-other`;
   const [otherUser] = await db
@@ -114,6 +134,11 @@ after(async () => {
     Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
   } else {
     process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+  }
+  if (ORIGINAL_LOCAL_SOURCE_ROOTS === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_LOCAL_SOURCE_ROOTS');
+  } else {
+    process.env.MNEMIS_LOCAL_SOURCE_ROOTS = ORIGINAL_LOCAL_SOURCE_ROOTS;
   }
   if (ORIGINAL_RERANK_PROVIDER === undefined) {
     Reflect.deleteProperty(process.env, 'MNEMIS_RERANK_PROVIDER');
@@ -209,6 +234,51 @@ describe('sources API', () => {
         Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
       } else {
         process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+      }
+    }
+  });
+
+  it('requires sources:local and redacts localPath from API responses and job payloads', async () => {
+    process.env.MNEMIS_ALLOW_LOCAL_SOURCES = 'true';
+    process.env.MNEMIS_LOCAL_SOURCE_ROOTS = tmpdir();
+    try {
+      const blocked = await app.request('/v1/sources', {
+        method: 'POST',
+        headers: headersFor(SOURCES_WRITE_KEY),
+        body: JSON.stringify({
+          kind: 'github_repo',
+          identifier: 'openai/local-path-no-scope',
+          config: { localPath: tmpdir() },
+          enqueue: false,
+        }),
+      });
+      assert.equal(blocked.status, 403);
+
+      const allowed = await app.request('/v1/sources', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          kind: 'github_repo',
+          identifier: 'openai/local-path-redacted',
+          config: { localPath: tmpdir(), includePaths: ['src'] },
+        }),
+      });
+      assert.equal(allowed.status, 201);
+      const json = await allowed.json();
+      assert.equal(json.data.config.localPathConfigured, true);
+      assert.equal(json.data.config.localPath, undefined);
+      assert.equal(json.job.payload.config.localPathConfigured, true);
+      assert.equal(json.job.payload.config.localPath, undefined);
+    } finally {
+      if (ORIGINAL_ALLOW_LOCAL_SOURCES === undefined) {
+        Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
+      } else {
+        process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+      }
+      if (ORIGINAL_LOCAL_SOURCE_ROOTS === undefined) {
+        Reflect.deleteProperty(process.env, 'MNEMIS_LOCAL_SOURCE_ROOTS');
+      } else {
+        process.env.MNEMIS_LOCAL_SOURCE_ROOTS = ORIGINAL_LOCAL_SOURCE_ROOTS;
       }
     }
   });
@@ -408,6 +478,48 @@ describe('source chunk search', () => {
     );
   });
 
+  it('requires search:content for content-bearing outputs', async () => {
+    const raw = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headersFor(SEARCH_READ_KEY),
+      body: JSON.stringify({
+        query: 'generated contextual prefix documentation retrieval',
+        sourceIds: [docsSourceId],
+        limit: 1,
+      }),
+    });
+    assert.equal(raw.status, 200);
+    const rawJson = await raw.json();
+    assert.equal(rawJson.mode, 'raw');
+    assert.equal('raw_text' in rawJson.items[0], false);
+
+    const withContent = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headersFor(SEARCH_READ_KEY),
+      body: JSON.stringify({
+        query: 'generated contextual prefix documentation retrieval',
+        sourceIds: [docsSourceId],
+        limit: 1,
+        include: ['content'],
+      }),
+    });
+    assert.equal(withContent.status, 403);
+    const withContentJson = await withContent.json();
+    assert.deepEqual(withContentJson.required_scopes, ['search:content']);
+
+    const markdown = await app.request('/v1/search', {
+      method: 'POST',
+      headers: headersFor(SEARCH_READ_KEY),
+      body: JSON.stringify({
+        query: 'generated contextual prefix documentation retrieval',
+        sourceIds: [docsSourceId],
+        limit: 1,
+        mode: 'markdown',
+      }),
+    });
+    assert.equal(markdown.status, 403);
+  });
+
   it('does not leak chunks from other workspaces', async () => {
     const res = await app.request('/v1/search', {
       method: 'POST',
@@ -481,6 +593,7 @@ describe('source chunk search', () => {
         query: 'NeedleChildTerm',
         sourceIds: [docsSourceId],
         limit: 5,
+        include: ['content'],
       }),
     });
     assert.equal(res.status, 200);

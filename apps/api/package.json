@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js && tsc --noEmit",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts"

@@ -3,6 +3,58 @@
 All notable changes to this project will be documented here. The project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-05-20
+
+Production hardening pass over `v0.1.0`. No external API breaks.
+
+### Added
+
+- **Rate limit middleware** (`apps/api/src/middleware/rate-limit.ts`):
+  per-workspace+api-key+IP token bucket, 60s window, 600 req/min in
+  self-host or 120 in cloud mode. Override with
+  `MNEMIS_RATE_LIMIT_PER_MINUTE`. Responses carry `ratelimit-limit`,
+  `ratelimit-remaining` and `ratelimit-reset`; over-limit returns 429
+  with `retry-after`.
+- **Body size limit middleware** (`apps/api/src/middleware/body-limit.ts`):
+  rejects requests whose `Content-Length` exceeds `MNEMIS_MAX_BODY_BYTES`
+  (default 1 MB) with 413 `payload_too_large`.
+- **API key HMAC hashing** (`packages/db/src/api-keys.ts`): when
+  `INTERNAL_AUTH_SECRET` is set, new key hashes use HMAC-SHA256 with the
+  `hmac_sha256:` prefix. Legacy SHA256 hashes still validate and are
+  silently re-hashed to HMAC on next use.
+- **API key revocation and expiration**: `api_keys.revoked_at` and
+  `api_keys.expires_at` columns are honoured by the auth middleware with
+  distinguishable 401 codes (`revoked_credentials`, `expired_credentials`).
+- **Usage events** (`apps/api/src/services/usage.ts`): `recordUsage()`
+  inserts rows into `usage_events` from search, memory save and source
+  indexing routes. Kinds: `request`, `search`, `save`, `index`,
+  `rerank`, `synthesize`.
+- **DB hardening migration**
+  (`packages/db/migrations/post/0002_hardening_constraints.sql`): CHECK
+  constraints on enum-like text columns (`role`, `kind`, `status`,
+  `index_strategy`) plus `confidence ∈ [0,1]`.
+- **Standalone migrate container** (`docker/Dockerfile.migrate` +
+  `--profile tools` in `docker-compose.prod.yml`): run schema migrations
+  in isolation with `docker compose --profile tools run --rm migrate`.
+- **SDK robustness**: `MnemisClientOptions` now accepts `timeoutMs` and
+  `signal`; the client raises `MnemisTimeoutError` on timeout/abort and
+  `MnemisNetworkError` on transport failures.
+
+### Changed
+
+- App middleware order in `apps/api/src/app.ts`: `secureHeaders` →
+  optional `logger` → `bodySizeLimit` → `apiKeyAuth` → `rateLimit` →
+  routes.
+- `packages/db` ships `tests/`; the new `test` script runs them.
+- `apps/cli`, `apps/mcp`, `packages/sdk` bumped to `0.1.1`.
+
+### Notes
+
+- Rate limit buckets are in-memory per process — multi-instance
+  deployments share no state. Fase 5 (cloud) will route through a
+  shared store.
+- DB hardening migration is idempotent and safe to re-apply.
+
 ## [0.1.0] — 2026-05-20
 
 First tagged release. Covers Phase 1 to 4 of the original plan plus the

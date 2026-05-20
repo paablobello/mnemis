@@ -9,10 +9,17 @@
  * issuing a new one. The full key has the form `mn_<32-hex>` so users can
  * recognise it in the wild.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { eq } from 'drizzle-orm';
-import { apiKeys, createDatabase, users, workspaces } from '../src/index.ts';
+import {
+  apiKeyHash,
+  apiKeyPrefix,
+  apiKeys,
+  createDatabase,
+  users,
+  workspaces,
+} from '../src/index.ts';
 
 const { values } = parseArgs({
   options: {
@@ -64,8 +71,8 @@ async function ensureWorkspace(ownerId: string): Promise<string> {
 
 function generateKey(): { raw: string; hash: string; prefix: string } {
   const raw = `mn_${randomBytes(24).toString('hex')}`;
-  const hash = createHash('sha256').update(raw).digest('hex');
-  const prefix = raw.slice(0, 11);
+  const hash = apiKeyHash(raw, process.env.INTERNAL_AUTH_SECRET);
+  const prefix = apiKeyPrefix(raw);
   return { raw, hash, prefix };
 }
 

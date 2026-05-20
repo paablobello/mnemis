@@ -7,7 +7,7 @@ import { after, afterEach, before, describe, it } from 'node:test';
 import { chunks, createDatabase, eq, jobs, sources, sql, users, workspaces } from '@mnemis/db';
 import { resetEmbeddingsForTests } from '@mnemis/embeddings';
 import { cronHasDueMinute, enqueueDueCronJobs } from '../src/cron.ts';
-import { processOneJob } from '../src/runner.ts';
+import { processOneJob, reapStaleIndexJobs } from '../src/runner.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL required for integration tests');
@@ -20,6 +20,7 @@ const ORIGINAL_VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 const ORIGINAL_ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ORIGINAL_ANTHROPIC_CONTEXT_MODEL = process.env.ANTHROPIC_CONTEXT_MODEL;
 const ORIGINAL_ALLOW_LOCAL_SOURCES = process.env.MNEMIS_ALLOW_LOCAL_SOURCES;
+const ORIGINAL_LOCAL_SOURCE_ROOTS = process.env.MNEMIS_LOCAL_SOURCE_ROOTS;
 const ORIGINAL_FETCH = globalThis.fetch;
 const CLAIM_FIRST = new Date('2000-01-01T00:00:00.000Z');
 
@@ -73,6 +74,7 @@ before(async () => {
   workspaceId = ws!.id;
 
   repoRoot = join(tmpdir(), `mnemis-worker-${randomBytes(4).toString('hex')}`);
+  process.env.MNEMIS_LOCAL_SOURCE_ROOTS = tmpdir();
   await mkdir(join(repoRoot, 'src'), { recursive: true });
   await mkdir(join(repoRoot, 'node_modules', 'ignored'), { recursive: true });
   await writeFile(
@@ -120,6 +122,11 @@ after(async () => {
     Reflect.deleteProperty(process.env, 'MNEMIS_ALLOW_LOCAL_SOURCES');
   } else {
     process.env.MNEMIS_ALLOW_LOCAL_SOURCES = ORIGINAL_ALLOW_LOCAL_SOURCES;
+  }
+  if (ORIGINAL_LOCAL_SOURCE_ROOTS === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_LOCAL_SOURCE_ROOTS');
+  } else {
+    process.env.MNEMIS_LOCAL_SOURCE_ROOTS = ORIGINAL_LOCAL_SOURCE_ROOTS;
   }
   resetEmbeddingsForTests();
 
@@ -272,6 +279,51 @@ describe('index worker', () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!.kind, 'reindex_source');
     assert.equal(rows[0]!.status, 'queued');
+  });
+
+  it('requeues stale processing jobs and fails jobs over max attempts', async () => {
+    const now = new Date('2026-05-20T10:00:00.000Z');
+    const staleStartedAt = new Date('2026-05-20T09:45:00.000Z');
+    const [retryable] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'index_source',
+        status: 'processing',
+        payload: { source_id: 'retryable' },
+        attempts: 1,
+        scheduledAt: CLAIM_FIRST,
+        startedAt: staleStartedAt,
+      })
+      .returning();
+    const [exhausted] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'reindex_source',
+        status: 'processing',
+        payload: { source_id: 'exhausted' },
+        attempts: 3,
+        scheduledAt: CLAIM_FIRST,
+        startedAt: staleStartedAt,
+      })
+      .returning();
+
+    const result = await reapStaleIndexJobs(db, {
+      now,
+      staleAfterMs: 5 * 60_000,
+      maxAttempts: 3,
+    });
+    assert.deepEqual(result, { requeued: 1, failed: 1 });
+
+    const [retryableJob] = await db.select().from(jobs).where(eq(jobs.id, retryable!.id));
+    const [exhaustedJob] = await db.select().from(jobs).where(eq(jobs.id, exhausted!.id));
+    assert.equal(retryableJob!.status, 'queued');
+    assert.equal(retryableJob!.startedAt, null);
+    assert.equal(retryableJob!.error, 'job_requeued_after_stale_processing');
+    assert.equal(exhaustedJob!.status, 'failed');
+    assert.equal(exhaustedJob!.error, 'job_failed_after_stale_max_attempts');
+    assert.ok(exhaustedJob!.completedAt);
   });
 
   it('fails localPath jobs unless local sources are explicitly enabled', async () => {

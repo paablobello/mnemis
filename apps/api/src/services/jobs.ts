@@ -11,14 +11,88 @@ export interface JobDto {
   workspace_id: string | null;
   kind: JobKind;
   status: JobStatus;
-  payload: unknown;
-  progress: unknown;
-  result: unknown;
+  payload: Record<string, unknown>;
+  progress: Record<string, unknown>;
+  result: Record<string, unknown> | null;
   error: string | null;
   attempts: number;
   scheduled_at: string;
   started_at: string | null;
   completed_at: string | null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function redactConfig(config: unknown): Record<string, unknown> | undefined {
+  const raw = asRecord(config);
+  const safe: Record<string, unknown> = {};
+  for (const key of [
+    'branch',
+    'includePaths',
+    'excludePaths',
+    'focusInstructions',
+    'maxFileBytes',
+    'chunkMaxChars',
+    'chunkOverlapLines',
+    'contextualPrefixMode',
+    'contextualPrefixMaxDocumentChars',
+    'contextualPrefixMaxChunkChars',
+    'maxPages',
+    'respectRobots',
+    'docsCrawler',
+  ]) {
+    if (raw[key] !== undefined) safe[key] = raw[key];
+  }
+  if (raw.githubInstallationId !== undefined) safe.githubInstallationLinked = true;
+  if (raw.localPath !== undefined) safe.localPathConfigured = true;
+  return Object.keys(safe).length > 0 ? safe : undefined;
+}
+
+function redactPayload(payload: unknown): Record<string, unknown> {
+  const raw = asRecord(payload);
+  const safe: Record<string, unknown> = {};
+  for (const key of [
+    'source_id',
+    'source_kind',
+    'identifier',
+    'github_delivery',
+    'github_event',
+    'github_installation_id',
+    'github_ref',
+    'github_branch',
+    'github_after',
+    'github_default_branch',
+  ]) {
+    if (raw[key] !== undefined) safe[key] = raw[key];
+  }
+  const config = redactConfig(raw.config);
+  if (config) safe.config = config;
+  return safe;
+}
+
+function redactResult(result: unknown): Record<string, unknown> | null {
+  if (result === null || result === undefined) return null;
+  const raw = asRecord(result);
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (/token|secret|key|path/i.test(key)) continue;
+    safe[key] = value;
+  }
+  return safe;
+}
+
+export function sanitizeOperationalError(message: string | null): string | null {
+  if (!message) return null;
+  return message
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s'"`]+/gi, '$1[redacted]')
+    .replace(/(x-api-key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
+    .replace(/(api[_-]?key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
+    .replace(/(token['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
+    .slice(0, 1_000);
 }
 
 export function jobToDto(job: Job): JobDto {
@@ -27,10 +101,10 @@ export function jobToDto(job: Job): JobDto {
     workspace_id: job.workspaceId,
     kind: job.kind as JobKind,
     status: job.status as JobStatus,
-    payload: job.payload,
-    progress: job.progress,
-    result: job.result,
-    error: job.error,
+    payload: redactPayload(job.payload),
+    progress: asRecord(job.progress),
+    result: redactResult(job.result),
+    error: sanitizeOperationalError(job.error),
     attempts: job.attempts,
     scheduled_at: job.scheduledAt.toISOString(),
     started_at: job.startedAt?.toISOString() ?? null,

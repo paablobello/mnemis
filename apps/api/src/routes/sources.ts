@@ -12,6 +12,7 @@ import {
   listSources,
   sourceToDto,
 } from '../services/sources.ts';
+import { recordUsage } from '../services/usage.ts';
 import { createSourceSchema, listSourcesQuerySchema } from '../validators/sources.ts';
 
 const STATUS_STREAM_INTERVAL_MS = 1_500;
@@ -27,7 +28,8 @@ sourcesRoutes.post('/', requireScopes('sources:write'), async (c) => {
     throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
   });
   const input = createSourceSchema.parse(body);
-  const { source, job } = await createSource(auth.workspaceId, input);
+  const { source, job } = await createSource(auth.workspaceId, input, { scopes: auth.scopes });
+  if (job) await recordUsage(c, 'index', 1, { source_id: source.id, source_kind: source.kind });
 
   return c.json(
     {
@@ -102,5 +104,6 @@ sourcesRoutes.post('/:id/reindex', requireScopes('sources:write'), async (c) => 
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
   const { job } = await enqueueReindex(auth.workspaceId, id);
+  await recordUsage(c, 'index', 1, { source_id: id, job_id: job.id });
   return c.json({ job: jobToDto(job) }, 202);
 });

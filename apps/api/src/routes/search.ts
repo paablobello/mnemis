@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ApiError } from '../errors.ts';
-import { requireScopes } from '../middleware/auth.ts';
+import { hasScope, requireScopes, scopeError } from '../middleware/auth.ts';
 import {
   type SearchCitation,
   buildCitations,
@@ -12,6 +12,7 @@ import {
   synthesizeAnswer,
 } from '../services/search-synthesis.ts';
 import { chunkToDto, searchSourceChunks } from '../services/source-search.ts';
+import { recordUsage } from '../services/usage.ts';
 import { sourceSearchSchema } from '../validators/sources.ts';
 
 export const searchRoutes = new Hono();
@@ -23,6 +24,11 @@ searchRoutes.post('/', requireScopes('search:read'), async (c) => {
   });
   const input = sourceSearchSchema.parse(body);
   const include = new Set(input.include ?? []);
+  const contentRequired =
+    include.has('content') || input.mode === 'markdown' || input.mode === 'synthesized';
+  if (contentRequired && !hasScope(auth.scopes, 'search:content')) {
+    return c.json(scopeError(['search:content']), 403);
+  }
 
   const result = await searchSourceChunks(
     auth.workspaceId,
@@ -61,11 +67,25 @@ searchRoutes.post('/', requireScopes('search:read'), async (c) => {
   };
 
   if (input.mode === 'raw') {
+    await recordUsage(c, 'search', 1, {
+      mode: input.mode,
+      retrieval: result.retrieval,
+      count: result.hits.length,
+      embedding_tokens: result.embedding_tokens,
+      reranker_tokens: result.reranker_tokens,
+    });
     return c.json({ ...base, mode: 'raw' });
   }
 
   if (input.mode === 'markdown') {
     const markdown = renderSearchMarkdown(input.query, result.hits, citations);
+    await recordUsage(c, 'search', 1, {
+      mode: input.mode,
+      retrieval: result.retrieval,
+      count: result.hits.length,
+      embedding_tokens: result.embedding_tokens,
+      reranker_tokens: result.reranker_tokens,
+    });
     return c.json({ ...base, mode: 'markdown', markdown });
   }
 
@@ -73,6 +93,13 @@ searchRoutes.post('/', requireScopes('search:read'), async (c) => {
     const synthesis = await synthesizeAnswer(input.query, result.hits, citations, {
       model: input.synthesisModel,
       ...defaultSynthesisOptions(),
+    });
+    await recordUsage(c, 'synthesize', 2, {
+      retrieval: result.retrieval,
+      count: result.hits.length,
+      embedding_tokens: result.embedding_tokens,
+      reranker_tokens: result.reranker_tokens,
+      synthesis_usage: synthesis.usage,
     });
     return c.json({
       ...base,
