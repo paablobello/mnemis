@@ -134,6 +134,12 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
 CLERK_SECRET_KEY=sk_...
 STRIPE_SECRET_KEY=sk_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+# Per-tier subscription prices used by /pricing (USD, monthly recurring)
+STRIPE_PRICE_BUILDER=price_...
+STRIPE_PRICE_TEAM=price_...
+STRIPE_PRICE_BUSINESS=price_...
+# Legacy alias for the dashboard's existing Upgrade button. Point at one of
+# the tier prices above (Business by default).
 STRIPE_PRICE_ID_PRO=price_...
 ```
 
@@ -142,6 +148,38 @@ Customer Portal for self-service changes. API quota enforcement is off in
 self-host mode and turns on by default when `MNEMIS_MODE=cloud`; it can be
 forced with `MNEMIS_ENFORCE_CREDITS=true`. The default beta allowance is
 `MNEMIS_FREE_MONTHLY_CREDITS=10000` unless overridden.
+
+### Pricing tiers
+
+Four tiers ship out of the box, plus an Enterprise contact link rendered on
+`/pricing`. Limits map 1:1 to columns on the `plans` table.
+
+| Tier       | Price/mo  | Credits/mo  | Sources | Research/mo |
+| ---------- | --------- | ----------- | ------- | ----------- |
+| Free       | $0        | 1,000       | 3       | 5           |
+| Builder    | $15       | 15,000      | 50      | 30          |
+| Team       | $50       | 75,000      | 500     | 200         |
+| Business   | $99       | Unlimited   | Unlimited | Unlimited |
+| Enterprise | custom    | Unlimited   | Unlimited | Unlimited |
+
+Seed (or re-seed) the `plans` table after creating the corresponding products
+in Stripe and pasting their `price_*` IDs into the env block above:
+
+```bash
+bun run --filter=@mnemis/db seed:plans
+```
+
+For local subscription flows you also need the Stripe CLI listening on the
+webhook endpoint so checkout completions reach the dashboard:
+
+```bash
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+# copy the printed whsec_... into STRIPE_WEBHOOK_SECRET and restart apps/web
+```
+
+Workspaces with no active subscription resolve to the Free tier through
+`getPlanForWorkspace`. Subscriptions in status `active` or `trialing` grant
+plan benefits; everything else (canceled, past_due, etc.) falls back to Free.
 
 ## Architecture
 
