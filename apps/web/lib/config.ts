@@ -1,11 +1,7 @@
 type Env = NodeJS.ProcessEnv | Record<string, string | undefined>;
 
 const CLERK_REQUIRED = ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'CLERK_SECRET_KEY'] as const;
-const STRIPE_BILLING_REQUIRED = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'STRIPE_PRICE_ID_PRO',
-] as const;
+const STRIPE_BILLING_REQUIRED = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const;
 const STRIPE_WEBHOOK_REQUIRED = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const;
 
 function missing(keys: readonly string[], env: Env): string[] {

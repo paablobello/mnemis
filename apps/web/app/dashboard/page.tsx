@@ -166,7 +166,11 @@ export default async function DashboardPage() {
           </article>
           <article className="metric">
             <span>Credits</span>
-            <strong>{snapshot.usage.credits_remaining}</strong>
+            <strong>
+              {snapshot.usage.credits_unlimited
+                ? 'Unlimited'
+                : snapshot.usage.credits_remaining.toLocaleString('en-US')}
+            </strong>
             <small>{snapshot.usage.credits_used} used this month</small>
           </article>
         </section>

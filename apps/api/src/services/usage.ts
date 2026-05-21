@@ -1,4 +1,4 @@
-import { usageEvents } from '@mnemis/db';
+import { type Database, usageEvents } from '@mnemis/db';
 import type { Context } from 'hono';
 import { getDb } from '../db.ts';
 
@@ -17,8 +17,18 @@ export async function recordUsage(
   costCredits = 1,
   metadata: Record<string, unknown> = {},
 ): Promise<void> {
+  await recordUsageWithDb(getDb(), c, kind, costCredits, metadata);
+}
+
+export async function recordUsageWithDb(
+  db: Database,
+  c: Context,
+  kind: UsageKind,
+  costCredits = 1,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
   const auth = c.get('auth');
-  await getDb()
+  await db
     .insert(usageEvents)
     .values({
       workspaceId: auth.workspaceId,

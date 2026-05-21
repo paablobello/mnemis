@@ -9,6 +9,11 @@ import {
   UserButton,
 } from '@clerk/nextjs';
 import { ArrowRight } from 'lucide-react';
+import type { ReactNode } from 'react';
+
+export function ClerkClientProvider({ children }: { children: ReactNode }) {
+  return <ClerkProvider>{children}</ClerkProvider>;
+}
 
 export function PublicAuthActions() {
   return (

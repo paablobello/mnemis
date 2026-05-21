@@ -71,8 +71,8 @@ function researchConfig(input: CreateResearchRunInput): Record<string, unknown> 
 export async function createResearchRun(
   workspaceId: string,
   input: CreateResearchRunInput,
+  db = getDb(),
 ): Promise<CreateResearchRunResult> {
-  const db = getDb();
   const [run] = await db
     .insert(researchRuns)
     .values({
@@ -93,6 +93,7 @@ export async function createResearchRun(
       query: run.query,
       config: run.config,
     },
+    db,
   });
 
   return { data: researchRunToDto(run), job: jobToDto(job) };

@@ -10,7 +10,6 @@ import {
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { ensureStripeCustomer } from '../../lib/billing';
 import { missingStripeBillingEnv } from '../../lib/config';
 import { getDashboardDb } from '../../lib/db';
 import { requireDashboardContext } from '../../lib/session';
@@ -108,38 +107,6 @@ export async function createResearchAction(formData: FormData) {
   }
   revalidatePath('/dashboard');
   redirect('/dashboard');
-}
-
-export async function startCheckoutAction(formData: FormData) {
-  const context = await requireDashboardContext();
-  if (missingStripeBillingEnv().length > 0) {
-    await setFlash('Stripe billing is not configured.');
-    redirect('/dashboard');
-  }
-
-  const priceId = stringValue(formData, 'priceId') || process.env.STRIPE_PRICE_ID_PRO;
-  if (!priceId) {
-    await setFlash('STRIPE_PRICE_ID_PRO is not configured.');
-    redirect('/dashboard');
-  }
-
-  const customer = await ensureStripeCustomer({
-    workspaceId: context.workspace.id,
-    workspaceName: context.workspace.name,
-    email: context.user.email,
-  });
-  const baseUrl = appUrl();
-  const session = await getStripe().checkout.sessions.create({
-    mode: 'subscription',
-    customer,
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${baseUrl}/dashboard?checkout=success`,
-    cancel_url: `${baseUrl}/dashboard?checkout=cancelled`,
-    metadata: { workspace_id: context.workspace.id },
-    subscription_data: { metadata: { workspace_id: context.workspace.id } },
-  });
-  if (!session.url) throw new Error('Stripe did not return a Checkout URL');
-  redirect(session.url);
 }
 
 export async function openBillingPortalAction() {

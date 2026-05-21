@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import { apiKeys, createDatabase, eq, jobs, researchRuns, users, workspaces } from '@mnemis/db';
+import {
+  apiKeys,
+  createDatabase,
+  eq,
+  jobs,
+  plans,
+  researchRuns,
+  usageEvents,
+  users,
+  workspaces,
+} from '@mnemis/db';
 import { createApp } from '../src/app.ts';
 
 const url = process.env.DATABASE_URL;
@@ -132,6 +142,14 @@ describe('research API', () => {
     process.env.MNEMIS_FREE_MONTHLY_CREDITS = '10';
 
     try {
+      const [freePlan] = await db.select().from(plans).where(eq(plans.id, 'free')).limit(1);
+      const creditLimit = freePlan?.monthlyCredits ?? 10;
+      await db.insert(usageEvents).values({
+        workspaceId,
+        kind: 'research',
+        costCredits: Math.max(0, creditLimit - 10),
+      });
+
       const res = await app.request('/v1/research/runs', {
         method: 'POST',
         headers: headersFor(RAW_KEY),
@@ -148,7 +166,7 @@ describe('research API', () => {
       assert.equal(res.status, 402);
       const json = await res.json();
       assert.equal(json.error, 'credits_exhausted');
-      assert.equal(json.details.credits_limit, 10);
+      assert.equal(json.details.credits_limit, creditLimit);
       assert.equal(json.details.credits_required, 20);
     } finally {
       if (previousEnforceCredits === undefined) {

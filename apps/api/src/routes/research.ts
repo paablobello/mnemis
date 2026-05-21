@@ -1,15 +1,17 @@
+import { researchRunCreditCost, withWorkspaceUsageLock } from '@mnemis/saas';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { getDb } from '../db.ts';
 import { requireScopes } from '../middleware/auth.ts';
 import { readJsonBody } from '../middleware/body-limit.ts';
-import { assertCreditsAvailable, assertResearchQuota } from '../services/quotas.ts';
+import { assertCreditsAvailableWithDb, assertResearchQuotaWithDb } from '../services/quotas.ts';
 import {
   createResearchRun,
   getResearchRun,
   listResearchRuns,
   researchRunToDto,
 } from '../services/research.ts';
-import { recordUsage } from '../services/usage.ts';
+import { recordUsageWithDb } from '../services/usage.ts';
 import { createResearchRunSchema, listResearchRunsQuerySchema } from '../validators/research.ts';
 
 export const researchRoutes = new Hono();
@@ -20,14 +22,17 @@ researchRoutes.post('/runs', requireScopes('research:write', 'sources:write'), a
   const auth = c.get('auth');
   const body = await readJsonBody(c.req.raw);
   const input = createResearchRunSchema.parse(body);
-  const estimatedCredits = input.depth === 'deep' ? 150 : input.depth === 'standard' ? 60 : 20;
-  await assertResearchQuota(auth.workspaceId);
-  await assertCreditsAvailable(auth.workspaceId, estimatedCredits);
-  const result = await createResearchRun(auth.workspaceId, input);
-  await recordUsage(c, 'research', estimatedCredits, {
-    research_run_id: result.data.id,
-    job_id: result.job.id,
-    depth: input.depth,
+  const estimatedCredits = researchRunCreditCost(input.depth ?? 'standard');
+  const result = await withWorkspaceUsageLock(getDb(), auth.workspaceId, async (db) => {
+    await assertResearchQuotaWithDb(db, auth.workspaceId);
+    await assertCreditsAvailableWithDb(db, auth.workspaceId, estimatedCredits);
+    const created = await createResearchRun(auth.workspaceId, input, db);
+    await recordUsageWithDb(db, c, 'research', estimatedCredits, {
+      research_run_id: created.data.id,
+      job_id: created.job.id,
+      depth: input.depth,
+    });
+    return created;
   });
   return c.json(result, 202);
 });

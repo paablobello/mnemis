@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { delimiter, isAbsolute, relative, resolve } from 'node:path';
-import { type Job, type Source, chunks, sources } from '@mnemis/db';
+import { type Database, type Job, type Source, chunks, sources } from '@mnemis/db';
 import { type SQL, and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import { ApiError } from '../errors.ts';
@@ -247,20 +247,22 @@ async function enqueueSourceJob(
   workspaceId: string,
   source: Source,
   kind: 'index_source' | 'reindex_source',
+  db = getDb(),
 ): Promise<Job> {
   return createJob({
     workspaceId,
     kind,
     payload: indexJobPayload(source),
+    db,
   });
 }
 
 export async function createSource(
   workspaceId: string,
   input: CreateSourceInput,
-  options: { scopes?: readonly string[] } = {},
+  options: { scopes?: readonly string[]; db?: Database } = {},
 ): Promise<{ source: Source; job: Job | null }> {
-  const db = getDb();
+  const db = options.db ?? getDb();
   const identifier = normalizeIdentifier(input.kind, input.identifier);
   await validateSourceConfig(workspaceId, input, options.scopes ?? []);
 
@@ -290,7 +292,9 @@ export async function createSource(
 
   if (!source) throw ApiError.internal('Source insert returned no row');
 
-  const job = input.enqueue ? await enqueueSourceJob(workspaceId, source, 'index_source') : null;
+  const job = input.enqueue
+    ? await enqueueSourceJob(workspaceId, source, 'index_source', db)
+    : null;
   return { source, job };
 }
 
@@ -369,8 +373,11 @@ export async function getSourceStatus(workspaceId: string, id: string): Promise<
   };
 }
 
-export async function enqueueReindex(workspaceId: string, id: string): Promise<{ job: Job }> {
-  const db = getDb();
+export async function enqueueReindex(
+  workspaceId: string,
+  id: string,
+  db = getDb(),
+): Promise<{ job: Job }> {
   const source = await getSource(workspaceId, id);
   const [updated] = await db
     .update(sources)
@@ -378,6 +385,6 @@ export async function enqueueReindex(workspaceId: string, id: string): Promise<{
     .where(and(eq(sources.workspaceId, workspaceId), eq(sources.id, id)))
     .returning();
 
-  const job = await enqueueSourceJob(workspaceId, updated ?? source, 'reindex_source');
+  const job = await enqueueSourceJob(workspaceId, updated ?? source, 'reindex_source', db);
   return { job };
 }

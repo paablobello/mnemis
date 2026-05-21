@@ -14,6 +14,8 @@ import {
 import {
   UNLIMITED_CREDITS_SENTINEL,
   billingPeriod,
+  createDashboardResearchRun,
+  createDashboardSource,
   generateApiKey,
   getPlanForWorkspace,
   getUsageSummary,
@@ -155,6 +157,136 @@ describe('saas helpers', () => {
         assert.equal(quota.max, 3);
       } finally {
         await db.delete(sources).where(eq(sources.workspaceId, workspace!.id));
+        await db.delete(workspaces).where(eq(workspaces.id, workspace!.id));
+        await db.delete(users).where(eq(users.id, user!.id));
+      }
+    },
+  );
+
+  it(
+    'records dashboard source and research usage against monthly credits',
+    { skip: !process.env.DATABASE_URL },
+    async () => {
+      const db = createDatabase({ url: process.env.DATABASE_URL!, max: 1, idleTimeout: 1 });
+      const slug = `saas-dashboard-usage-${randomBytes(4).toString('hex')}`;
+      const [user] = await db
+        .insert(users)
+        .values({ email: `${slug}@mnemis.test`, name: slug })
+        .returning({ id: users.id });
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ slug, name: slug, ownerId: user!.id })
+        .returning({ id: workspaces.id });
+
+      try {
+        await createDashboardSource({
+          db,
+          workspaceId: workspace!.id,
+          kind: 'web_page',
+          identifier: `https://example.com/${slug}`,
+        });
+        await createDashboardResearchRun({
+          db,
+          workspaceId: workspace!.id,
+          query: 'dashboard usage accounting',
+          depth: 'quick',
+        });
+
+        const summary = await getUsageSummary(db, workspace!.id);
+        assert.equal(summary.credits_used, 21);
+        assert.equal(summary.requests, 2);
+      } finally {
+        await db.delete(workspaces).where(eq(workspaces.id, workspace!.id));
+        await db.delete(users).where(eq(users.id, user!.id));
+      }
+    },
+  );
+
+  it(
+    'blocks dashboard research runs when the workspace credit limit is exhausted',
+    { skip: !process.env.DATABASE_URL },
+    async () => {
+      const db = createDatabase({ url: process.env.DATABASE_URL!, max: 1, idleTimeout: 1 });
+      const slug = `saas-dashboard-block-${randomBytes(4).toString('hex')}`;
+      const [user] = await db
+        .insert(users)
+        .values({ email: `${slug}@mnemis.test`, name: slug })
+        .returning({ id: users.id });
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ slug, name: slug, ownerId: user!.id })
+        .returning({ id: workspaces.id });
+
+      try {
+        const [freePlan] = await db.select().from(plans).where(eq(plans.id, 'free')).limit(1);
+        const limit = freePlan?.monthlyCredits ?? monthlyCreditLimit();
+        await db.insert(usageEvents).values({
+          workspaceId: workspace!.id,
+          kind: 'research',
+          costCredits: Math.max(0, limit - 10),
+        });
+
+        await assert.rejects(
+          createDashboardResearchRun({
+            db,
+            workspaceId: workspace!.id,
+            query: 'should be blocked',
+            depth: 'quick',
+          }),
+          /Credit quota reached/,
+        );
+      } finally {
+        await db.delete(workspaces).where(eq(workspaces.id, workspace!.id));
+        await db.delete(users).where(eq(users.id, user!.id));
+      }
+    },
+  );
+
+  it(
+    'serializes concurrent dashboard credit checks per workspace',
+    { skip: !process.env.DATABASE_URL },
+    async () => {
+      const db = createDatabase({ url: process.env.DATABASE_URL!, max: 4, idleTimeout: 1 });
+      const slug = `saas-dashboard-concurrent-${randomBytes(4).toString('hex')}`;
+      const [user] = await db
+        .insert(users)
+        .values({ email: `${slug}@mnemis.test`, name: slug })
+        .returning({ id: users.id });
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ slug, name: slug, ownerId: user!.id })
+        .returning({ id: workspaces.id });
+
+      try {
+        const [freePlan] = await db.select().from(plans).where(eq(plans.id, 'free')).limit(1);
+        const limit = freePlan?.monthlyCredits ?? monthlyCreditLimit();
+        await db.insert(usageEvents).values({
+          workspaceId: workspace!.id,
+          kind: 'research',
+          costCredits: Math.max(0, limit - 30),
+        });
+
+        const results = await Promise.allSettled([
+          createDashboardResearchRun({
+            db,
+            workspaceId: workspace!.id,
+            query: 'first concurrent run',
+            depth: 'quick',
+          }),
+          createDashboardResearchRun({
+            db,
+            workspaceId: workspace!.id,
+            query: 'second concurrent run',
+            depth: 'quick',
+          }),
+        ]);
+
+        assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+        assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+
+        const summary = await getUsageSummary(db, workspace!.id);
+        assert.equal(summary.credits_used, limit - 10);
+      } finally {
         await db.delete(workspaces).where(eq(workspaces.id, workspace!.id));
         await db.delete(users).where(eq(users.id, user!.id));
       }

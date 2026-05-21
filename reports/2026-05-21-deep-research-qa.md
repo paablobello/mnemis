@@ -1,6 +1,6 @@
 # Deep Research QA - 2026-05-21
 
-Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45-6b6f0effafb7`
+Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04-7e672f7fb748`
 
 ## Environment
 - `TAVILY_API_KEY`: set
@@ -16,24 +16,30 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 
 ## Checks
 ### PASS - web discovery: Tavily + Exa candidates
-- Duration: 4347ms
+- Duration: 1776ms
 
 ```json
 {
   "candidates": 12,
   "providers": {
     "tavily": 12,
-    "exa": 3
+    "exa": 1
   },
   "issues": [
     "brave: brave_not_configured"
   ],
   "top": [
     {
+      "provider": "tavily",
+      "kind": "web_page",
+      "title": "How #useActionState simplifies React 19 forms with server actions | Jiya Agrawal posted on the topic",
+      "url": "https://www.linkedin.com/posts/jiyaagrawal_reactjs-tip-useactionstate-activity-7376204540649324544-y4bz"
+    },
+    {
       "provider": "tavily,exa",
       "kind": "web_page",
-      "title": "useActionState in React: A practical guide with examples",
-      "url": "https://blog.logrocket.com/react-useactionstate"
+      "title": "useActionState - React",
+      "url": "https://react.dev/reference/react/useActionState"
     },
     {
       "provider": "tavily",
@@ -44,86 +50,79 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
     {
       "provider": "tavily",
       "kind": "web_page",
-      "title": "How #useActionState simplifies React 19 forms with server actions | Jiya Agrawal posted on the topic",
-      "url": "https://www.linkedin.com/posts/jiyaagrawal_reactjs-tip-useactionstate-activity-7376204540649324544-y4bz"
+      "title": "React useActionState Hook",
+      "url": "https://codefinity.com/blog/React-useActionState-Hook"
     },
     {
       "provider": "tavily",
       "kind": "web_page",
-      "title": "Simplify Form Handling in React 19: Introducing `useActionState` Hook | Senvio",
-      "url": "https://www.senvio.com/blog/simplify-form-handling-in-react-19-introducing-use"
-    },
-    {
-      "provider": "tavily",
-      "kind": "web_page",
-      "title": "Form Handling: useActionState Hook | React 19 - YouTube",
-      "url": "https://www.youtube.com/watch?v=Rf1bLZGQoL4"
+      "title": "Exploring React 19: New Features vs. Traditional Methods",
+      "url": "https://devm.io/javascript/react-19-new-features"
     }
   ]
 }
 ```
 
 ### PASS - academic discovery: papers and PDFs
-- Duration: 838ms
+- Duration: 2013ms
 
 ```json
 {
   "candidates": 12,
   "providers": {
-    "openalex": 12
+    "semantic_scholar": 12,
+    "crossref": 1
   },
-  "issues": [
-    "semantic_scholar: HTTP 429: {\"message\": \"Too Many Requests. Please wait and try again or apply for a key for higher rate limits. https://www.semanticscholar.org/product/api#api-key-form\", \"code\": \"429\"}"
-  ],
+  "issues": [],
   "top": [
     {
-      "provider": "openalex",
-      "title": "A Survey of Large Language Models",
-      "pdfUrl": "https://link.springer.com/content/pdf/10.1007/s11704-026-60308-3.pdf",
-      "doi": "10.1007/s11704-026-60308-3",
-      "year": 2026
-    },
-    {
-      "provider": "openalex",
-      "title": "Large Language Models for Information Retrieval: A Survey",
-      "pdfUrl": "https://arxiv.org/pdf/2308.07107",
-      "doi": "10.48550/arxiv.2308.07107",
-      "year": 2023
-    },
-    {
-      "provider": "openalex",
-      "title": "Development and validation of an autonomous artificial intelligence agent for clinical decision-maki",
-      "pdfUrl": "https://www.nature.com/articles/s43018-025-00991-6.pdf",
-      "doi": "10.1038/s43018-025-00991-6",
+      "provider": "semantic_scholar,crossref",
+      "title": "Systematic Evaluation of Similarity Metrics for Retrieval, Reranking, and Completion in Retrieval Au",
+      "pdfUrl": "",
+      "doi": "10.1109/etecom66111.2025.11319066",
       "year": 2025
     },
     {
-      "provider": "openalex",
-      "title": "Retrieval-Augmented Generation (RAG) in Healthcare: A Comprehensive Review",
-      "pdfUrl": "https://www.mdpi.com/2673-2688/6/9/226/pdf?version=1757581602",
-      "doi": "10.3390/ai6090226",
+      "provider": "semantic_scholar",
+      "title": "Correctness is not Faithfulness in Retrieval Augmented Generation Attributions",
+      "pdfUrl": "",
+      "doi": "10.1145/3731120.3744592",
       "year": 2025
     },
     {
-      "provider": "openalex",
-      "title": "The Semantic Scholar Open Data Platform",
-      "pdfUrl": "https://arxiv.org/pdf/2301.10140",
-      "doi": "10.48550/arxiv.2301.10140",
-      "year": 2023
+      "provider": "semantic_scholar",
+      "title": "Retrieval-Augmented Generation for Maternal Healthcare: Design and Evaluation of a Clinical Question",
+      "pdfUrl": "",
+      "doi": "10.1109/ENC68268.2025.11311944",
+      "year": 2025
     },
     {
-      "provider": "openalex",
-      "title": "From text to insight: large language models for chemical data extraction",
-      "pdfUrl": "https://pubs.rsc.org/en/content/articlepdf/2025/cs/d4cs00913d",
-      "doi": "10.1039/d4cs00913d",
-      "year": 2024
+      "provider": "semantic_scholar",
+      "title": "LLM-powered threat intelligence: a retrieval-augmented generation approach for cyber attack investig",
+      "pdfUrl": "",
+      "doi": "10.7717/peerj-cs.3371",
+      "year": 2025
+    },
+    {
+      "provider": "semantic_scholar",
+      "title": "Rethinking Retrieval: From Traditional Retrieval Augmented Generation to Agentic and Non-Vector Reas",
+      "pdfUrl": "",
+      "doi": "10.48550/arXiv.2511.18177",
+      "year": 2025
+    },
+    {
+      "provider": "semantic_scholar",
+      "title": "RAG-X: Density-Adaptive Path Sampling for Enhanced Knowledge Graph-Based Retrieval Augmented Generat",
+      "pdfUrl": "",
+      "doi": "10.1109/IConSCEPT66142.2025.11437293",
+      "year": 2025
     }
   ]
 }
 ```
 
 ### PASS - direct index: React docs web page
-- Duration: 726ms
+- Duration: 700ms
 
 ```json
 {
@@ -140,7 +139,7 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - direct index: technical blog web page
-- Duration: 333ms
+- Duration: 527ms
 
 ```json
 {
@@ -157,13 +156,13 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - direct index: docs site crawl
-- Duration: 14475ms
+- Duration: 9187ms
 
 ```json
 {
   "files": 3,
   "chunks": 64,
-  "chars": 43165,
+  "chars": 43190,
   "pages": 0,
   "crawler_provider": "firecrawl",
   "pdf_extractor": null,
@@ -174,7 +173,7 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - direct index: arXiv PDF auto fast path
-- Duration: 365ms
+- Duration: 538ms
 
 ```json
 {
@@ -191,7 +190,7 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - direct index: arXiv PDF sidecar forced
-- Duration: 71917ms
+- Duration: 79441ms
 
 ```json
 {
@@ -208,7 +207,7 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - live contextual prefix: one chunk
-- Duration: 1326ms
+- Duration: 1242ms
 
 ```json
 {
@@ -217,17 +216,17 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
   "skipped": 0,
   "skippedReason": null,
   "model": "claude-haiku-4-5",
-  "sample": "RAG evaluation framework covering modern research agent capabilities including source discovery, PDF and blog indexing, page-level citation requirements, and retrieval benchmark criteria for assessing source quality, emb"
+  "sample": "This is the complete document content. The chunk represents the entire document, which discusses key requirements for evaluating Retrieval-Augmented Generation (RAG) systems, including source discovery, document indexing"
 }
 ```
 
 ### PASS - research run: seed URLs: docs + blog + PDF
-- Duration: 26144ms
+- Duration: 40937ms
 
 ```json
 {
-  "run_id": "06e3b7c5-59c1-4d63-b46b-361e551aa45f",
-  "job_id": "9b6ca6d6-7521-4eef-aef6-eb8a9aac1c91",
+  "run_id": "caeccf3f-f0fb-48fc-b89a-7e04a8045ba1",
+  "job_id": "462a7118-4a60-4d81-9c42-29d0112c67e9",
   "processed": true,
   "status": "completed",
   "error": null,
@@ -275,12 +274,12 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - research run: web discovery + indexing
-- Duration: 10123ms
+- Duration: 16248ms
 
 ```json
 {
-  "run_id": "a88545ca-06c6-44f6-80ee-eb275a446ae2",
-  "job_id": "f7775fa7-2d4d-4cd7-a2c3-7ecda672b893",
+  "run_id": "b3d88377-c867-4633-a2d2-c65a2498291c",
+  "job_id": "02ae0e43-9d78-4e5b-8787-76c83b849940",
   "processed": true,
   "status": "completed",
   "error": null,
@@ -291,18 +290,18 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
     "brave: brave_not_configured"
   ],
   "link_statuses": {
-    "indexed": 3,
-    "failed": 1
+    "failed": 1,
+    "indexed": 3
   },
   "indexed": [
     {
       "kind": "web_page",
-      "identifier": "https://blog.logrocket.com/react-useactionstate",
+      "identifier": "https://react.dev/reference/react/useActionState",
       "provider": "tavily,exa",
-      "chunks": 15,
-      "embedded": 15,
+      "chunks": 42,
+      "embedded": 42,
       "embedding_models": {
-        "voyage-4-large": 15
+        "voyage-4-large": 42
       }
     },
     {
@@ -317,12 +316,12 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
     },
     {
       "kind": "web_page",
-      "identifier": "https://www.senvio.com/blog/simplify-form-handling-in-react-19-introducing-use",
+      "identifier": "https://codefinity.com/blog/React-useActionState-Hook",
       "provider": "tavily",
-      "chunks": 4,
-      "embedded": 4,
+      "chunks": 12,
+      "embedded": 12,
       "embedding_models": {
-        "voyage-4-large": 4
+        "voyage-4-large": 12
       }
     }
   ],
@@ -338,12 +337,12 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 ```
 
 ### PASS - research run: academic paper discovery + indexing (bounded)
-- Duration: 2498ms
+- Duration: 5697ms
 
 ```json
 {
-  "run_id": "8aaf76cc-db17-4708-86b7-71acb973422b",
-  "job_id": "57dee2ed-6145-46c3-a10f-9b53b7c3a75b",
+  "run_id": "1271e61b-b05a-4c5f-9a5e-5289154a0682",
+  "job_id": "babd9330-eb60-4227-8d92-548f7964210d",
   "processed": true,
   "status": "completed",
   "error": null,
@@ -376,9 +375,9 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
 - `academic_paper` https://drops.dagstuhl.de/entities/document/10.4230/OASIcs.LDK.2019.21: status=indexed, chunks=19, pages=0, embedded=19, crawler=firecrawl, pdf=n/a
 - `pdf_document` https://arxiv.org/pdf/1706.03762: status=indexed, chunks=31, pages=15, embedded=31, crawler=n/a, pdf=unpdf
 - `web_page` https://blog.logrocket.com/react-useactionstate: status=indexed, chunks=15, pages=0, embedded=15, crawler=firecrawl, pdf=n/a
+- `web_page` https://codefinity.com/blog/React-useActionState-Hook: status=indexed, chunks=12, pages=0, embedded=12, crawler=firecrawl, pdf=n/a
 - `web_page` https://react.dev/reference/react/useActionState: status=indexed, chunks=42, pages=0, embedded=42, crawler=firecrawl, pdf=n/a
 - `web_page` https://www.linkedin.com/posts/jiyaagrawal_reactjs-tip-useactionstate-activity-7376204540649324544-y4bz: status=failed, chunks=0, pages=0, embedded=0, crawler=n/a, pdf=n/a
-- `web_page` https://www.senvio.com/blog/simplify-form-handling-in-react-19-introducing-use: status=indexed, chunks=4, pages=0, embedded=4, crawler=firecrawl, pdf=n/a
 - `web_page` https://www.telerik.com/blogs/guide-new-hooks-react-19: status=indexed, chunks=26, pages=0, embedded=26, crawler=firecrawl, pdf=n/a
 
 ## Search Checks
@@ -398,53 +397,53 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
   },
   {
     "kind": "web_page",
+    "identifier": "https://blog.logrocket.com/react-useactionstate",
+    "path": "react-useactionstate.md",
+    "page": null,
+    "crawler_provider": "firecrawl",
+    "pdf_extractor": null,
+    "score": 0.22261904180049896,
+    "snippet": "# useActionState in React: A practical guide with examples - LogRocket Blog [**Advisory boards aren’t only for executives. Join the LogRocket Content Advisory Board today →**](https://lp.logrocket.com/blg/content-advisor"
+  },
+  {
+    "kind": "web_page",
     "identifier": "https://www.telerik.com/blogs/guide-new-hooks-react-19",
     "path": "blogs/guide-new-hooks-react-19.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.2643061876296997,
+    "score": 0.1280297189950943,
     "snippet": "### Example: A Feedback Form Let’s walk through a practical example to illustrate how `useActionState` can be applied in a real-world scenario. Assume we wanted to build a simple feedback form that allows users to submit"
   },
   {
     "kind": "web_page",
-    "identifier": "https://react.dev/reference/react/useActionState",
-    "path": "reference/react/useActionState.md",
+    "identifier": "https://blog.logrocket.com/react-useactionstate",
+    "path": "react-useactionstate.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.1428571492433548,
-    "snippet": "## Usage [Link for Usage ](https://react.dev/reference/react/useActionState\\#usage \"Link for Usage \")"
+    "score": 0.09477764368057251,
+    "snippet": "## Working with multiple `useActionState` Hooks So far, we’ve seen how `useActionState` can simplify a single interaction, like submitting a form or toggling a like button. But what happens when you have multiple indepen"
   },
   {
     "kind": "web_page",
-    "identifier": "https://react.dev/reference/react/useActionState",
-    "path": "reference/react/useActionState.md",
+    "identifier": "https://codefinity.com/blog/React-useActionState-Hook",
+    "path": "blog/React-useActionState-Hook.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.10337243974208832,
-    "snippet": "### My Action cannot read form data [Link for My Action cannot read form data ](https://react.dev/reference/react/useActionState\\#action-cannot-read-form-data \"Link for My Action cannot read form data \") When you use `us"
+    "score": 0.0731423944234848,
+    "snippet": "## FAQs **Q**: What is the `useActionState` hook in React 19? **A**: `useActionState` is a new React 19 hook that simplifies form management by handling state updates, errors, and pending states automatically. It elimina"
   },
   {
     "kind": "web_page",
-    "identifier": "https://react.dev/reference/react/useActionState",
-    "path": "reference/react/useActionState.md",
+    "identifier": "https://blog.logrocket.com/react-useactionstate",
+    "path": "react-useactionstate.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.10000000149011612,
-    "snippet": "## Troubleshooting [Link for Troubleshooting ](https://react.dev/reference/react/useActionState\\#troubleshooting \"Link for Troubleshooting \")"
-  },
-  {
-    "kind": "web_page",
-    "identifier": "https://react.dev/reference/react/useActionState",
-    "path": "reference/react/useActionState.md",
-    "page": null,
-    "crawler_provider": "firecrawl",
-    "pdf_extractor": null,
-    "score": 0.06472563743591309,
-    "snippet": "# useActionState [Link for this heading](https://react.dev/reference/react/useActionState\\#undefined \"Link for this heading\") `useActionState` is a React Hook that lets you update state with side effects using [Actions]("
+    "score": 0.06233510747551918,
+    "snippet": "### Form submission Now let’s take it a step further. Beyond simple counters, `useActionState` really shines in real-world scenarios like handling [form submissions](https://blog.logrocket.com/react-hook-form-complete-gu"
   }
 ]
 ```
@@ -456,11 +455,31 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
   {
     "kind": "pdf_document",
     "identifier": "https://arxiv.org/pdf/1706.03762",
+    "path": "pdf/1706.03762/page-5.md",
+    "page": 5,
+    "crawler_provider": null,
+    "pdf_extractor": "unpdf",
+    "score": 0.5068566799163818,
+    "snippet": "## Page 5 output values. These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2. Multi-head attention allows the model to jointly attend to information from different repr"
+  },
+  {
+    "kind": "pdf_document",
+    "identifier": "https://arxiv.org/pdf/1706.03762",
+    "path": "pdf/1706.03762/page-5.md",
+    "page": 5,
+    "crawler_provider": null,
+    "pdf_extractor": "unpdf",
+    "score": 0.3333333432674408,
+    "snippet": "# arxiv.org"
+  },
+  {
+    "kind": "pdf_document",
+    "identifier": "https://arxiv.org/pdf/1706.03762",
     "path": "pdf/1706.03762/page-3.md",
     "page": 3,
     "crawler_provider": null,
     "pdf_extractor": "unpdf",
-    "score": 0.04986967891454697,
+    "score": 0.09490399062633514,
     "snippet": "## Page 3 Figure 1: The Transformer - model architecture. The Transformer follows this overall architecture using stacked self-attention and point-wise, fully connected layers for both the encoder and decoder, shown in t"
   },
   {
@@ -472,16 +491,6 @@ Workspace: `deep-research-qa-20260521021019-54a73e5d` / `db09c843-4c09-4e73-ac45
     "pdf_extractor": "unpdf",
     "score": 0.04285714402794838,
     "snippet": "## Page 10 Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23 of WSJ) Parser Training WSJ 23 F1 Vinyals & Kaiser el al. (2014) [37] WSJ only, discriminative 88.3 Petrov e"
-  },
-  {
-    "kind": "pdf_document",
-    "identifier": "https://arxiv.org/pdf/1706.03762",
-    "path": "pdf/1706.03762/page-5.md",
-    "page": 5,
-    "crawler_provider": null,
-    "pdf_extractor": "unpdf",
-    "score": 0.02857142873108387,
-    "snippet": "## Page 5 output values. These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2. Multi-head attention allows the model to jointly attend to information from different repr"
   },
   {
     "kind": "pdf_document",

@@ -197,6 +197,72 @@ export async function getWorkspaceResearchQuota(
   return { used: row?.count ?? 0, max: plan.maxResearchRunsPerMonth };
 }
 
+export function researchRunCreditCost(depth: 'quick' | 'standard' | 'deep'): number {
+  return depth === 'deep' ? 150 : depth === 'standard' ? 60 : 20;
+}
+
+async function getWorkspaceUsedCredits(
+  db: Database,
+  workspaceId: string,
+  now = new Date(),
+): Promise<number> {
+  const { start, end } = billingPeriod(now);
+  const [row] = await db
+    .select({ credits: sql<number>`coalesce(sum(${usageEvents.costCredits}), 0)::int` })
+    .from(usageEvents)
+    .where(
+      and(
+        eq(usageEvents.workspaceId, workspaceId),
+        gte(usageEvents.occurredAt, start),
+        lt(usageEvents.occurredAt, end),
+      ),
+    );
+  return row?.credits ?? 0;
+}
+
+export async function assertWorkspaceCreditsAvailable(
+  db: Database,
+  workspaceId: string,
+  costCredits: number,
+  now = new Date(),
+): Promise<void> {
+  const plan = await getPlanForWorkspace(db, workspaceId);
+  if (plan.monthlyCredits >= UNLIMITED_CREDITS_SENTINEL) return;
+
+  const used = await getWorkspaceUsedCredits(db, workspaceId, now);
+  if (used + costCredits <= plan.monthlyCredits) return;
+
+  throw new Error(
+    `Credit quota reached (${used}/${plan.monthlyCredits}). Upgrade your plan to continue.`,
+  );
+}
+
+export async function recordWorkspaceUsage(input: {
+  db: Database;
+  workspaceId: string;
+  kind: 'index' | 'research';
+  costCredits: number;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  await input.db.insert(usageEvents).values({
+    workspaceId: input.workspaceId,
+    kind: input.kind,
+    costCredits: input.costCredits,
+    metadata: input.metadata ?? {},
+  });
+}
+
+export async function withWorkspaceUsageLock<T>(
+  db: Database,
+  workspaceId: string,
+  fn: (tx: Database) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${workspaceId}))`);
+    return fn(tx as unknown as Database);
+  });
+}
+
 export const DEFAULT_KEY_SCOPES = [
   'memories:*',
   'sources:*',
@@ -563,57 +629,65 @@ export async function createDashboardSource(input: {
   displayName?: string | null;
 }): Promise<Source> {
   const identifier = normalizeUrl(input.identifier);
-  const [existing, quota] = await Promise.all([
-    input.db
+  return withWorkspaceUsageLock(input.db, input.workspaceId, async (db) => {
+    const existing = await db
       .select({ id: sources.id })
       .from(sources)
       .where(and(eq(sources.workspaceId, input.workspaceId), eq(sources.identifier, identifier)))
-      .limit(1),
-    getWorkspaceSourceQuota(input.db, input.workspaceId),
-  ]);
-  if (existing[0]) throw new Error('source already exists');
-  if (quota.max !== null && quota.used >= quota.max) {
-    throw new Error(
-      `Source quota reached (${quota.used}/${quota.max}). Upgrade your plan to add more.`,
-    );
-  }
+      .limit(1);
+    const quota = await getWorkspaceSourceQuota(db, input.workspaceId);
+    if (existing[0]) throw new Error('source already exists');
+    if (quota.max !== null && quota.used >= quota.max) {
+      throw new Error(
+        `Source quota reached (${quota.used}/${quota.max}). Upgrade your plan to add more.`,
+      );
+    }
+    await assertWorkspaceCreditsAvailable(db, input.workspaceId, 1);
 
-  const url = new URL(identifier);
-  const [source] = await input.db
-    .insert(sources)
-    .values({
+    const url = new URL(identifier);
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId: input.workspaceId,
+        kind: input.kind,
+        identifier,
+        displayName:
+          input.displayName?.trim() ||
+          (url.pathname && url.pathname !== '/' ? `${url.hostname}${url.pathname}` : url.hostname),
+        config:
+          input.kind === 'docs_site'
+            ? { docsCrawler: 'auto', maxPages: 100, respectRobots: true }
+            : input.kind === 'pdf_document'
+              ? { pdfExtractor: 'auto' }
+              : {},
+        indexStrategy: 'manual',
+        status: 'pending',
+        statusMessage: 'Index job queued',
+      })
+      .returning();
+    if (!source) throw new Error('failed to create source');
+
+    await db.insert(jobs).values({
       workspaceId: input.workspaceId,
-      kind: input.kind,
-      identifier,
-      displayName:
-        input.displayName?.trim() ||
-        (url.pathname && url.pathname !== '/' ? `${url.hostname}${url.pathname}` : url.hostname),
-      config:
-        input.kind === 'docs_site'
-          ? { docsCrawler: 'auto', maxPages: 100, respectRobots: true }
-          : input.kind === 'pdf_document'
-            ? { pdfExtractor: 'auto' }
-            : {},
-      indexStrategy: 'manual',
-      status: 'pending',
-      statusMessage: 'Index job queued',
-    })
-    .returning();
-  if (!source) throw new Error('failed to create source');
+      kind: 'index_source',
+      payload: {
+        source_id: source.id,
+        source_kind: source.kind,
+        identifier: source.identifier,
+        config: source.config,
+      },
+      progress: { done: 0, total: null, current: null },
+    });
+    await recordWorkspaceUsage({
+      db,
+      workspaceId: input.workspaceId,
+      kind: 'index',
+      costCredits: 1,
+      metadata: { source_id: source.id, source_kind: source.kind },
+    });
 
-  await input.db.insert(jobs).values({
-    workspaceId: input.workspaceId,
-    kind: 'index_source',
-    payload: {
-      source_id: source.id,
-      source_kind: source.kind,
-      identifier: source.identifier,
-      config: source.config,
-    },
-    progress: { done: 0, total: null, current: null },
+    return source;
   });
-
-  return source;
 }
 
 export async function createDashboardResearchRun(input: {
@@ -624,44 +698,56 @@ export async function createDashboardResearchRun(input: {
 }): Promise<string> {
   const query = input.query.trim();
   if (!query) throw new Error('query is required');
-  const quota = await getWorkspaceResearchQuota(input.db, input.workspaceId);
-  if (quota.max !== null && quota.used >= quota.max) {
-    throw new Error(
-      `Research run quota reached (${quota.used}/${quota.max} this month). Upgrade your plan to run more.`,
-    );
-  }
-  const config = {
-    depth: input.depth ?? 'standard',
-    maxSources: input.depth === 'deep' ? 20 : 8,
-    includeWeb: true,
-    includePapers: true,
-    includePdfs: true,
-    index: true,
-    urls: [],
-  };
+  const depth = input.depth ?? 'standard';
+  const costCredits = researchRunCreditCost(depth);
+  return withWorkspaceUsageLock(input.db, input.workspaceId, async (db) => {
+    const quota = await getWorkspaceResearchQuota(db, input.workspaceId);
+    if (quota.max !== null && quota.used >= quota.max) {
+      throw new Error(
+        `Research run quota reached (${quota.used}/${quota.max} this month). Upgrade your plan to run more.`,
+      );
+    }
+    await assertWorkspaceCreditsAvailable(db, input.workspaceId, costCredits);
+    const config = {
+      depth,
+      maxSources: depth === 'deep' ? 20 : 8,
+      includeWeb: true,
+      includePapers: true,
+      includePdfs: true,
+      index: true,
+      urls: [],
+    };
 
-  const [run] = await input.db
-    .insert(researchRuns)
-    .values({
+    const [run] = await db
+      .insert(researchRuns)
+      .values({
+        workspaceId: input.workspaceId,
+        query,
+        depth: config.depth,
+        status: 'queued',
+        config,
+      })
+      .returning({ id: researchRuns.id });
+    if (!run) throw new Error('failed to create research run');
+
+    await db.insert(jobs).values({
       workspaceId: input.workspaceId,
-      query,
-      depth: config.depth,
-      status: 'queued',
-      config,
-    })
-    .returning({ id: researchRuns.id });
-  if (!run) throw new Error('failed to create research run');
+      kind: 'research_run',
+      payload: {
+        research_run_id: run.id,
+        query,
+        config,
+      },
+      progress: { done: 0, total: null, current: null },
+    });
+    await recordWorkspaceUsage({
+      db,
+      workspaceId: input.workspaceId,
+      kind: 'research',
+      costCredits,
+      metadata: { research_run_id: run.id, depth },
+    });
 
-  await input.db.insert(jobs).values({
-    workspaceId: input.workspaceId,
-    kind: 'research_run',
-    payload: {
-      research_run_id: run.id,
-      query,
-      config,
-    },
-    progress: { done: 0, total: null, current: null },
+    return run.id;
   });
-
-  return run.id;
 }

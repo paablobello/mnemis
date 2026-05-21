@@ -1,10 +1,12 @@
+import { withWorkspaceUsageLock } from '@mnemis/saas';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
+import { getDb } from '../db.ts';
 import { requireScopes } from '../middleware/auth.ts';
 import { readJsonBody } from '../middleware/body-limit.ts';
 import { jobToDto } from '../services/jobs.ts';
-import { assertCreditsAvailable, assertSourceQuota } from '../services/quotas.ts';
+import { assertCreditsAvailableWithDb, assertSourceQuotaWithDb } from '../services/quotas.ts';
 import {
   createSource,
   enqueueReindex,
@@ -13,7 +15,7 @@ import {
   listSources,
   sourceToDto,
 } from '../services/sources.ts';
-import { recordUsage } from '../services/usage.ts';
+import { recordUsageWithDb } from '../services/usage.ts';
 import { createSourceSchema, listSourcesQuerySchema } from '../validators/sources.ts';
 
 const STATUS_STREAM_INTERVAL_MS = 1_500;
@@ -27,10 +29,18 @@ sourcesRoutes.post('/', requireScopes('sources:write'), async (c) => {
   const auth = c.get('auth');
   const body = await readJsonBody(c.req.raw);
   const input = createSourceSchema.parse(body);
-  await assertSourceQuota(auth.workspaceId);
-  if (input.enqueue) await assertCreditsAvailable(auth.workspaceId, 1);
-  const { source, job } = await createSource(auth.workspaceId, input, { scopes: auth.scopes });
-  if (job) await recordUsage(c, 'index', 1, { source_id: source.id, source_kind: source.kind });
+  const { source, job } = await withWorkspaceUsageLock(getDb(), auth.workspaceId, async (db) => {
+    await assertSourceQuotaWithDb(db, auth.workspaceId);
+    if (input.enqueue) await assertCreditsAvailableWithDb(db, auth.workspaceId, 1);
+    const created = await createSource(auth.workspaceId, input, { scopes: auth.scopes, db });
+    if (created.job) {
+      await recordUsageWithDb(db, c, 'index', 1, {
+        source_id: created.source.id,
+        source_kind: created.source.kind,
+      });
+    }
+    return created;
+  });
 
   return c.json(
     {
@@ -104,8 +114,11 @@ sourcesRoutes.get('/:id/status/stream', requireScopes('sources:read'), (c) => {
 sourcesRoutes.post('/:id/reindex', requireScopes('sources:write'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
-  await assertCreditsAvailable(auth.workspaceId, 1);
-  const { job } = await enqueueReindex(auth.workspaceId, id);
-  await recordUsage(c, 'index', 1, { source_id: id, job_id: job.id });
+  const { job } = await withWorkspaceUsageLock(getDb(), auth.workspaceId, async (db) => {
+    await assertCreditsAvailableWithDb(db, auth.workspaceId, 1);
+    const created = await enqueueReindex(auth.workspaceId, id, db);
+    await recordUsageWithDb(db, c, 'index', 1, { source_id: id, job_id: created.job.id });
+    return created;
+  });
   return c.json({ job: jobToDto(job) }, 202);
 });

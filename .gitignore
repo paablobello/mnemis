@@ -19,6 +19,7 @@ __pycache__/
 .vscode/*
 !.vscode/settings.example.json
 !.vscode/extensions.json
+.claude/settings.local.json
 
 postgres-data/
 redis-data/

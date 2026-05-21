@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { isClerkConfigured } from '../../lib/config';
 import { getDashboardDb } from '../../lib/db';
 import { requireDashboardContext } from '../../lib/session';
+import { ClerkClientProvider } from '../clerk-controls';
 import { subscribeToTierAction } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,7 @@ async function loadCurrentPlanId(): Promise<string | null> {
 }
 
 export default async function PricingPage() {
+  const clerkConfigured = isClerkConfigured();
   const [planRows, currentPlanId] = await Promise.all([
     getDashboardDb().select().from(plans).orderBy(asc(plans.monthlyCredits)),
     loadCurrentPlanId(),
@@ -65,7 +67,7 @@ export default async function PricingPage() {
       hasStripePrice: Boolean(p.stripePriceId),
     }));
 
-  return (
+  const page = (
     <main className="public-shell">
       <header className="public-hero">
         <Link href="/" className="brand-mark" style={{ textDecoration: 'none' }}>
@@ -110,7 +112,7 @@ export default async function PricingPage() {
                 {isCurrent ? (
                   <span className="pill good">Current plan</span>
                 ) : tier.hasStripePrice ? (
-                  isClerkConfigured() ? (
+                  clerkConfigured ? (
                     <Show when="signed-in">
                       <form action={subscribeToTierAction}>
                         <input type="hidden" name="planId" value={tier.id} />
@@ -124,7 +126,7 @@ export default async function PricingPage() {
                 ) : (
                   <span className="pill neutral">No payment required</span>
                 )}
-                {tier.hasStripePrice && isClerkConfigured() ? (
+                {tier.hasStripePrice && clerkConfigured ? (
                   <Show when="signed-out">
                     <SignInButton mode="modal">
                       <button className="primary-action" type="button">
@@ -172,4 +174,6 @@ export default async function PricingPage() {
       </section>
     </main>
   );
+
+  return clerkConfigured ? <ClerkClientProvider>{page}</ClerkClientProvider> : page;
 }

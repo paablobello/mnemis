@@ -1,4 +1,4 @@
-import { usageEvents } from '@mnemis/db';
+import { type Database, usageEvents } from '@mnemis/db';
 import {
   billingPeriod,
   getWorkspaceCreditLimit,
@@ -19,13 +19,13 @@ function creditsEnforced(): boolean {
   return envBoolean('MNEMIS_ENFORCE_CREDITS', process.env.MNEMIS_MODE === 'cloud');
 }
 
-export async function assertCreditsAvailable(
+export async function assertCreditsAvailableWithDb(
+  db: Database,
   workspaceId: string,
   costCredits: number,
 ): Promise<void> {
   if (!creditsEnforced()) return;
 
-  const db = getDb();
   const limit = await getWorkspaceCreditLimit(db, workspaceId);
   if (limit >= Number.MAX_SAFE_INTEGER) return;
 
@@ -53,9 +53,16 @@ export async function assertCreditsAvailable(
   });
 }
 
-export async function assertSourceQuota(workspaceId: string): Promise<void> {
+export async function assertCreditsAvailable(
+  workspaceId: string,
+  costCredits: number,
+): Promise<void> {
+  await assertCreditsAvailableWithDb(getDb(), workspaceId, costCredits);
+}
+
+export async function assertSourceQuotaWithDb(db: Database, workspaceId: string): Promise<void> {
   if (!creditsEnforced()) return;
-  const quota = await getWorkspaceSourceQuota(getDb(), workspaceId);
+  const quota = await getWorkspaceSourceQuota(db, workspaceId);
   if (quota.max === null || quota.used < quota.max) return;
   throw new ApiError(
     402,
@@ -65,9 +72,13 @@ export async function assertSourceQuota(workspaceId: string): Promise<void> {
   );
 }
 
-export async function assertResearchQuota(workspaceId: string): Promise<void> {
+export async function assertSourceQuota(workspaceId: string): Promise<void> {
+  await assertSourceQuotaWithDb(getDb(), workspaceId);
+}
+
+export async function assertResearchQuotaWithDb(db: Database, workspaceId: string): Promise<void> {
   if (!creditsEnforced()) return;
-  const quota = await getWorkspaceResearchQuota(getDb(), workspaceId);
+  const quota = await getWorkspaceResearchQuota(db, workspaceId);
   if (quota.max === null || quota.used < quota.max) return;
   throw new ApiError(
     402,
@@ -75,4 +86,8 @@ export async function assertResearchQuota(workspaceId: string): Promise<void> {
     'Workspace has reached its monthly research-run quota for the current plan',
     { research_runs_used: quota.used, research_runs_limit: quota.max },
   );
+}
+
+export async function assertResearchQuota(workspaceId: string): Promise<void> {
+  await assertResearchQuotaWithDb(getDb(), workspaceId);
 }

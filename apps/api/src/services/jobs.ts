@@ -1,4 +1,4 @@
-import { type Job, jobs } from '@mnemis/db';
+import { type Database, type Job, jobs } from '@mnemis/db';
 import { type SQL, and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import { ApiError } from '../errors.ts';
@@ -131,8 +131,9 @@ export async function createJob(input: {
   payload: Record<string, unknown>;
   progress?: Record<string, unknown>;
   scheduledAt?: Date;
+  db?: Database;
 }): Promise<Job> {
-  const db = getDb();
+  const db = input.db ?? getDb();
   const [job] = await db
     .insert(jobs)
     .values({

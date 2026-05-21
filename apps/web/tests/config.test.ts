@@ -37,17 +37,16 @@ describe('web configuration helpers', () => {
     assert.doesNotThrow(() => requireClerkConfig(env));
   });
 
-  it('separates Stripe billing config from webhook-only config', () => {
-    const webhookOnly = {
+  it('accepts Stripe billing config without the legacy single-price alias', () => {
+    const tierBilling = {
       STRIPE_SECRET_KEY: 'sk_test_123',
       STRIPE_WEBHOOK_SECRET: 'whsec_123',
-      STRIPE_PRICE_ID_PRO: '',
     };
 
-    assert.equal(isStripeWebhookConfigured(webhookOnly), true);
-    assert.deepEqual(missingStripeWebhookEnv(webhookOnly), []);
-    assert.equal(isStripeBillingConfigured(webhookOnly), false);
-    assert.deepEqual(missingStripeBillingEnv(webhookOnly), ['STRIPE_PRICE_ID_PRO']);
+    assert.equal(isStripeWebhookConfigured(tierBilling), true);
+    assert.deepEqual(missingStripeWebhookEnv(tierBilling), []);
+    assert.equal(isStripeBillingConfigured(tierBilling), true);
+    assert.deepEqual(missingStripeBillingEnv(tierBilling), []);
   });
 
   it('fails closed before constructing a Stripe client when the secret key is absent', () => {
