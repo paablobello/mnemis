@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
+  boolean,
   customType,
   index,
   integer,
@@ -35,11 +36,13 @@ export const users = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     email: text('email').notNull(),
     name: text('name'),
+    externalId: text('external_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
     emailIdx: uniqueIndex('users_email_idx').on(t.email),
+    externalIdIdx: uniqueIndex('users_external_id_idx').on(t.externalId),
   }),
 );
 
@@ -52,6 +55,7 @@ export const workspaces = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     slug: text('slug').notNull(),
     name: text('name').notNull(),
+    externalId: text('external_id'),
     ownerId: uuid('owner_id')
       .references(() => users.id, { onDelete: 'restrict' })
       .notNull(),
@@ -60,7 +64,77 @@ export const workspaces = pgTable(
   },
   (t) => ({
     slugIdx: uniqueIndex('workspaces_slug_idx').on(t.slug),
+    externalIdIdx: uniqueIndex('workspaces_external_id_idx').on(t.externalId),
     ownerIdx: index('workspaces_owner_idx').on(t.ownerId),
+  }),
+);
+
+/* ----------------------------------------------------------------------------
+ *  SaaS billing
+ * --------------------------------------------------------------------------*/
+export const plans = pgTable(
+  'plans',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    stripePriceId: text('stripe_price_id'),
+    monthlyCredits: integer('monthly_credits').notNull(),
+    includedSeats: integer('included_seats').notNull().default(1),
+    maxSources: integer('max_sources'),
+    maxResearchRunsPerMonth: integer('max_research_runs_per_month'),
+    features: jsonb('features').notNull().default({}),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    stripePriceIdx: uniqueIndex('plans_stripe_price_idx').on(t.stripePriceId),
+  }),
+);
+
+export const billingCustomers = pgTable(
+  'billing_customers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    stripeCustomerId: text('stripe_customer_id').notNull(),
+    billingEmail: text('billing_email'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    workspaceIdx: uniqueIndex('billing_customers_workspace_idx').on(t.workspaceId),
+    stripeCustomerIdx: uniqueIndex('billing_customers_stripe_customer_idx').on(t.stripeCustomerId),
+  }),
+);
+
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    planId: text('plan_id').references(() => plans.id, { onDelete: 'set null' }),
+    stripeSubscriptionId: text('stripe_subscription_id').notNull(),
+    stripePriceId: text('stripe_price_id').notNull(),
+    status: text('status').notNull(),
+    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+    trialEnd: timestamp('trial_end', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    workspaceIdx: uniqueIndex('subscriptions_workspace_idx').on(t.workspaceId),
+    stripeSubscriptionIdx: uniqueIndex('subscriptions_stripe_subscription_idx').on(
+      t.stripeSubscriptionId,
+    ),
+    statusIdx: index('subscriptions_status_idx').on(t.status),
   }),
 );
 
@@ -410,11 +484,34 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   owner: one(users, { fields: [workspaces.ownerId], references: [users.id] }),
   members: many(workspaceMembers),
+  billingCustomer: one(billingCustomers, {
+    fields: [workspaces.id],
+    references: [billingCustomers.workspaceId],
+  }),
+  subscription: one(subscriptions, {
+    fields: [workspaces.id],
+    references: [subscriptions.workspaceId],
+  }),
   githubAppInstallations: many(githubAppInstallations),
   apiKeys: many(apiKeys),
   sources: many(sources),
   researchRuns: many(researchRuns),
   memories: many(memories),
+}));
+
+export const billingCustomersRelations = relations(billingCustomers, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [billingCustomers.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [subscriptions.workspaceId],
+    references: [workspaces.id],
+  }),
+  plan: one(plans, { fields: [subscriptions.planId], references: [plans.id] }),
 }));
 
 export const githubAppInstallationsRelations = relations(githubAppInstallations, ({ one }) => ({
@@ -470,6 +567,9 @@ export const memoriesRelations = relations(memories, ({ one }) => ({
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Workspace = typeof workspaces.$inferSelect;
+export type Plan = typeof plans.$inferSelect;
+export type BillingCustomer = typeof billingCustomers.$inferSelect;
+export type Subscription = typeof subscriptions.$inferSelect;
 export type GitHubAppInstallation = typeof githubAppInstallations.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type Source = typeof sources.$inferSelect;

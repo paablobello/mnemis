@@ -21,6 +21,7 @@ import {
   patchMemory,
   toDto,
 } from '../services/memories.ts';
+import { assertCreditsAvailable } from '../services/quotas.ts';
 import { type SearchHit, searchHybrid, searchKeyword } from '../services/search.ts';
 import { recordUsage } from '../services/usage.ts';
 import {
@@ -56,6 +57,7 @@ memoriesRoutes.post('/search', requireScopes('search:read'), async (c) => {
   if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
     return c.json(scopeError(['memories:embedding']), 403);
   }
+  await assertCreditsAvailable(auth.workspaceId, 1);
   const hits = await searchKeyword(
     auth.workspaceId,
     input.query,
@@ -79,6 +81,7 @@ memoriesRoutes.post('/semantic-search', requireScopes('search:read'), async (c) 
   if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
     return c.json(scopeError(['memories:embedding']), 403);
   }
+  await assertCreditsAvailable(auth.workspaceId, 1);
   const result = await searchHybrid(
     auth.workspaceId,
     input.query,
@@ -109,6 +112,7 @@ memoriesRoutes.post('/', requireScopes('memories:write'), async (c) => {
   const auth = c.get('auth');
   const body = await readJsonBody(c.req.raw);
   const input = createMemorySchema.parse(body);
+  await assertCreditsAvailable(auth.workspaceId, 1);
   const created = await createMemory(auth.workspaceId, input);
   await recordUsage(c, 'save', 1, { memory_id: created.id, kind: created.kind });
   return c.json({ data: toDto(created, { includeLineage: true }) }, 201);

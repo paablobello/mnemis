@@ -6,6 +6,13 @@
     "API_PORT",
     "API_HOST",
     "MNEMIS_VERSION",
+    "NEXT_PUBLIC_APP_URL",
+    "NEXT_PUBLIC_MNEMIS_API_URL",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "CLERK_SECRET_KEY",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_PRICE_ID_PRO",
     "ANTHROPIC_API_KEY",
     "MNEMIS_CONTEXTUAL_PREFIX_CONCURRENCY",
     "VOYAGE_API_KEY",
@@ -36,6 +43,8 @@
     "MNEMIS_LOCAL_SOURCE_ROOTS",
     "MNEMIS_MAX_BODY_BYTES",
     "MNEMIS_RATE_LIMIT_PER_MINUTE",
+    "MNEMIS_FREE_MONTHLY_CREDITS",
+    "MNEMIS_ENFORCE_CREDITS",
     "MNEMIS_RATE_LIMIT_BACKEND",
     "MNEMIS_TRUST_PROXY",
     "MNEMIS_RERANK_PROVIDER",
@@ -53,7 +62,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", ".next/**"]
     },
     "dev": {
       "cache": false,

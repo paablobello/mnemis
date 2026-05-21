@@ -63,6 +63,8 @@ const envSchema = z.object({
   MNEMIS_LOCAL_SOURCE_ROOTS: optionalString,
   MNEMIS_MAX_BODY_BYTES: optionalPositiveInt,
   MNEMIS_RATE_LIMIT_PER_MINUTE: optionalPositiveInt,
+  MNEMIS_FREE_MONTHLY_CREDITS: optionalPositiveInt,
+  MNEMIS_ENFORCE_CREDITS: envBoolean(false),
   MNEMIS_RATE_LIMIT_BACKEND: z.preprocess(
     emptyToUndefined,
     z.enum(['memory', 'postgres']).optional(),

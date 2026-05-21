@@ -6,11 +6,13 @@ COPY package.json bun.lock turbo.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/cli/package.json apps/cli/
 COPY apps/mcp/package.json apps/mcp/
+COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 COPY packages/db/package.json packages/db/
 COPY packages/embeddings/package.json packages/embeddings/
 COPY packages/eval/package.json packages/eval/
 COPY packages/indexer/package.json packages/indexer/
+COPY packages/saas/package.json packages/saas/
 COPY packages/sdk/package.json packages/sdk/
 
 RUN bun install --frozen-lockfile
@@ -19,6 +21,7 @@ COPY apps/api ./apps/api
 COPY packages/db ./packages/db
 COPY packages/embeddings ./packages/embeddings
 COPY packages/indexer ./packages/indexer
+COPY packages/saas ./packages/saas
 COPY packages/sdk ./packages/sdk
 
 RUN bun --filter @mnemis/api build

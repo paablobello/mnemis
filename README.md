@@ -108,6 +108,41 @@ the same Postgres volume and start with healthchecks. Optional integrations
 (Voyage, Anthropic, Firecrawl, GitHub App, local reranker) are pure env
 vars — set them in `.env.prod` and `docker compose restart`.
 
+## Hosted SaaS dashboard
+
+The hosted beta surface lives in `apps/web` and is intentionally operational:
+it is for onboarding workspaces, creating API keys, launching indexing/research,
+checking usage, and opening Stripe billing. It uses Clerk for human login and
+keeps the existing API-key flow for MCP/CLI/SDK agents.
+When a Clerk organization is active, its `orgId` is mapped to the Mnemis
+workspace `external_id`; otherwise the dashboard creates a personal beta
+workspace for the signed-in user.
+
+```bash
+cd apps/web
+bun run dev
+```
+
+Required dashboard env:
+
+```env
+DATABASE_URL=postgres://...
+INTERNAL_AUTH_SECRET=...
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_MNEMIS_API_URL=http://localhost:8787
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
+STRIPE_SECRET_KEY=sk_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_ID_PRO=price_...
+```
+
+Billing uses Stripe Billing with Checkout Sessions for subscription start and
+Customer Portal for self-service changes. API quota enforcement is off in
+self-host mode and turns on by default when `MNEMIS_MODE=cloud`; it can be
+forced with `MNEMIS_ENFORCE_CREDITS=true`. The default beta allowance is
+`MNEMIS_FREE_MONTHLY_CREDITS=10000` unless overridden.
+
 ## Architecture
 
 Single Postgres for everything (pgvector + tsvector + relational data + jobs table). TypeScript everywhere (Bun + Node 22). MCP server, REST API, CLI, and integrations share the same TypeScript SDK. Docs can use the native crawler or Firecrawl when `FIRECRAWL_API_KEY` is configured.

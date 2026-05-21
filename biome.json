@@ -7,7 +7,17 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "ignore": ["dist", "node_modules", ".turbo", "coverage", "**/migrations/**"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      ".turbo",
+      ".next",
+      "**/.next",
+      "**/.clerk",
+      "**/next-env.d.ts",
+      "coverage",
+      "**/migrations/**"
+    ]
   },
   "formatter": {
     "enabled": true,

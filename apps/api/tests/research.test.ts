@@ -124,4 +124,43 @@ describe('research API', () => {
       .where(eq(researchRuns.workspaceId, workspaceId));
     assert.ok(rows.length >= 1);
   });
+
+  it('blocks expensive research runs when workspace credits are exhausted', async () => {
+    const previousEnforceCredits = process.env.MNEMIS_ENFORCE_CREDITS;
+    const previousFreeCredits = process.env.MNEMIS_FREE_MONTHLY_CREDITS;
+    process.env.MNEMIS_ENFORCE_CREDITS = 'true';
+    process.env.MNEMIS_FREE_MONTHLY_CREDITS = '10';
+
+    try {
+      const res = await app.request('/v1/research/runs', {
+        method: 'POST',
+        headers: headersFor(RAW_KEY),
+        body: JSON.stringify({
+          query: 'quota blocked research',
+          depth: 'quick',
+          maxSources: 3,
+          includeWeb: false,
+          includePapers: false,
+          urls: ['https://example.com/quota'],
+        }),
+      });
+
+      assert.equal(res.status, 402);
+      const json = await res.json();
+      assert.equal(json.error, 'credits_exhausted');
+      assert.equal(json.details.credits_limit, 10);
+      assert.equal(json.details.credits_required, 20);
+    } finally {
+      if (previousEnforceCredits === undefined) {
+        process.env.MNEMIS_ENFORCE_CREDITS = '';
+      } else {
+        process.env.MNEMIS_ENFORCE_CREDITS = previousEnforceCredits;
+      }
+      if (previousFreeCredits === undefined) {
+        process.env.MNEMIS_FREE_MONTHLY_CREDITS = '';
+      } else {
+        process.env.MNEMIS_FREE_MONTHLY_CREDITS = previousFreeCredits;
+      }
+    }
+  });
 });

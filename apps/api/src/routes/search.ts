@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { ApiError } from '../errors.ts';
 import { hasScope, requireScopes, scopeError } from '../middleware/auth.ts';
 import { readJsonBody } from '../middleware/body-limit.ts';
+import { assertCreditsAvailable } from '../services/quotas.ts';
 import {
   type SearchCitation,
   buildCitations,
@@ -28,6 +29,8 @@ searchRoutes.post('/', requireScopes('search:read'), async (c) => {
   if (contentRequired && !hasScope(auth.scopes, 'search:content')) {
     return c.json(scopeError(['search:content']), 403);
   }
+  const estimatedCredits = input.mode === 'synthesized' ? 2 : 1;
+  await assertCreditsAvailable(auth.workspaceId, estimatedCredits);
 
   const result = await searchSourceChunks(
     auth.workspaceId,
