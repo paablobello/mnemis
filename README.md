@@ -46,6 +46,49 @@ bun run cli status
 
 For full CLI and SDK usage, see [`docs/cli-sdk.md`](./docs/cli-sdk.md).
 
+## Live research and PDF extraction
+
+For the strongest research workflow, configure at least one web search provider
+(`TAVILY_API_KEY` or `EXA_API_KEY`), `OPENALEX_EMAIL` for academic discovery,
+`FIRECRAWL_API_KEY` for high-quality web/docs crawling, and `VOYAGE_API_KEY` for
+embeddings. `SEMANTIC_SCHOLAR_API_KEY` is optional: without it, Semantic Scholar
+may return 429s and Mnemis will continue through OpenAlex/arXiv/Crossref where
+available.
+
+Text-rich PDFs work through the native extractor in `pdfExtractor=auto`. For
+sparse/scanned PDFs or highest-quality paper metadata, run the Docling/GROBID
+sidecar:
+
+```bash
+docker compose -f docker/docker-compose.yml --profile pdf up -d pdf-extractor
+```
+
+Then set:
+
+```env
+MNEMIS_PDF_EXTRACTOR_URL=http://localhost:8790/extract
+```
+
+Leave `MNEMIS_PDF_EXTRACTOR_URL` empty when the sidecar is not running. In the
+production Compose stack with `--profile pdf`, use:
+
+```env
+MNEMIS_PDF_EXTRACTOR_URL=http://pdf-extractor:8790/extract
+```
+
+Repeatable live QA checks are available once Postgres, API, worker, and any
+needed provider keys are running:
+
+```bash
+bun run qa:research:smoke
+bun run qa:research:deep
+bun run qa:mcp-live
+```
+
+For agent clients, prefer `bun run cli init` or the published `@mnemis/mcp`
+package entrypoint. Local dev wrappers such as `bun --filter @mnemis/mcp start`
+are for development and are not the recommended MCP client command.
+
 ## Production self-host (Docker)
 
 A ready-to-run stack with Postgres + API + worker lives in

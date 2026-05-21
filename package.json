@@ -28,6 +28,9 @@
     "mcp:dev": "bun --filter @mnemis/mcp dev",
     "cli": "bun --filter @mnemis/cli start",
     "test:local": "DATABASE_URL=postgres://mnemis:mnemis_dev@localhost:5433/mnemis INTERNAL_AUTH_SECRET=test-secret MNEMIS_ALLOW_LOCAL_SOURCES=true bun run test",
+    "qa:research:smoke": "bun --env-file=.env scripts/research-live-smoke.ts",
+    "qa:research:deep": "bun --env-file=.env scripts/research-deep-qa.ts",
+    "qa:mcp-live": "bun --env-file=.env scripts/mcp-live-smoke.ts",
     "benchmark": "bun --filter @mnemis/eval benchmark"
   },
   "devDependencies": {
