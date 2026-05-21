@@ -18,6 +18,7 @@
     "pre-migrate": "node --experimental-strip-types scripts/run-sql-dir.ts pre",
     "post-migrate": "node --experimental-strip-types scripts/run-sql-dir.ts post",
     "bootstrap": "node --experimental-strip-types scripts/bootstrap.ts",
+    "seed:plans": "node --experimental-strip-types scripts/seed-plans.ts",
     "studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts"

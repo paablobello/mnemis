@@ -1,7 +1,8 @@
-import { billingCustomers, subscriptions } from '@mnemis/db';
+import { billingCustomers, eq, plans, subscriptions } from '@mnemis/db';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
+import { isStripeWebhookConfigured } from '../../../../lib/config';
 import { getDashboardDb } from '../../../../lib/db';
 import { getStripe } from '../../../../lib/stripe';
 
@@ -24,9 +25,15 @@ async function upsertSubscription(subscription: Stripe.Subscription): Promise<vo
   if (!workspaceId || !priceId) return;
 
   const db = getDashboardDb();
+  const [plan] = await db
+    .select({ id: plans.id })
+    .from(plans)
+    .where(eq(plans.stripePriceId, priceId))
+    .limit(1);
+
   const values = {
     workspaceId,
-    planId: null,
+    planId: plan?.id ?? null,
     stripeSubscriptionId: subscription.id,
     stripePriceId: priceId,
     status: subscription.status,
@@ -68,8 +75,8 @@ async function linkCheckoutSession(session: Stripe.Checkout.Session): Promise<vo
 
 export async function POST(req: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) {
-    return NextResponse.json({ error: 'stripe_webhook_secret_missing' }, { status: 500 });
+  if (!isStripeWebhookConfigured() || !secret) {
+    return NextResponse.json({ error: 'stripe_webhook_not_configured' }, { status: 503 });
   }
 
   const body = await req.text();
