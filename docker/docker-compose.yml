@@ -20,5 +20,33 @@ services:
       timeout: 3s
       retries: 10
 
+  grobid:
+    image: ${GROBID_IMAGE:-grobid/grobid:0.9.0-crf}
+    profiles: ['pdf']
+    container_name: mnemis-grobid
+    restart: unless-stopped
+    init: true
+    ulimits:
+      core: 0
+    ports:
+      - '8070:8070'
+
+  pdf-extractor:
+    build:
+      context: ..
+      dockerfile: services/pdf-extractor/Dockerfile
+    profiles: ['pdf']
+    container_name: mnemis-pdf-extractor
+    restart: unless-stopped
+    depends_on:
+      - grobid
+    environment:
+      PDF_EXTRACTOR_MAX_BYTES: ${PDF_EXTRACTOR_MAX_BYTES:-52428800}
+      PDF_EXTRACTOR_ENABLE_GROBID: ${PDF_EXTRACTOR_ENABLE_GROBID:-true}
+      PDF_EXTRACTOR_GROBID_URL: ${PDF_EXTRACTOR_GROBID_URL:-http://grobid:8070}
+      PDF_EXTRACTOR_GROBID_TIMEOUT_SECONDS: ${PDF_EXTRACTOR_GROBID_TIMEOUT_SECONDS:-120}
+    ports:
+      - '8790:8790'
+
 volumes:
   postgres-data:

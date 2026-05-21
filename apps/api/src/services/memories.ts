@@ -12,7 +12,7 @@ import {
   type MemoryKindInput,
   TTL_DEFAULTS,
 } from '../validators/memories.ts';
-import { getEmbeddings } from './embeddings.ts';
+import { tryEmbedText } from './embeddings.ts';
 
 /* ----------------------------------------------------------------------------
  *  Public DTO
@@ -101,11 +101,8 @@ async function maybeEmbed(input: CreateMemoryInput): Promise<{
   vector: number[] | null;
   modelVersion: string | null;
 }> {
-  const client = getEmbeddings();
-  if (!client) return { vector: null, modelVersion: null };
-
   const text = embedSourceFor(input);
-  const result = await client.embed(text, { inputType: 'document' });
+  const result = await tryEmbedText(text, { inputType: 'document', context: 'memory create' });
   return { vector: result.vector, modelVersion: result.model };
 }
 

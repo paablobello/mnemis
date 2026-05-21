@@ -1,0 +1,2 @@
+"""Mnemis PDF extraction sidecar."""
+

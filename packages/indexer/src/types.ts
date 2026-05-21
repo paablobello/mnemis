@@ -2,13 +2,16 @@ export interface IndexSourceConfig {
   includePaths?: string[];
   excludePaths?: string[];
   focusInstructions?: string;
+  title?: string;
   localPath?: string;
   maxFileBytes?: number;
+  maxPdfBytes?: number;
   chunkMaxChars?: number;
   chunkOverlapLines?: number;
   maxPages?: number;
   respectRobots?: boolean;
   docsCrawler?: 'auto' | 'native' | 'firecrawl';
+  pdfExtractor?: 'auto' | 'native' | 'sidecar';
   contextualPrefixMode?: 'auto' | 'always' | 'never';
   contextualPrefixMaxDocumentChars?: number;
   contextualPrefixMaxChunkChars?: number;
@@ -21,6 +24,8 @@ export interface LoadedFile {
   language: string | null;
   byteLength: number;
   modifiedAt: Date;
+  page?: number | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface IndexChunk {
@@ -29,6 +34,7 @@ export interface IndexChunk {
   path: string;
   lineStart: number;
   lineEnd: number;
+  page?: number | null;
   rawText: string;
   contextualPrefix: string | null;
   language: string | null;

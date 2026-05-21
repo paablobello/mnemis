@@ -2,7 +2,7 @@ import { type Chunk, type Source, chunks, sources } from '@mnemis/db';
 import { type SQL, and, eq, ilike, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import type { SourceKindInput } from '../validators/sources.ts';
-import { getEmbeddings } from './embeddings.ts';
+import { tryEmbedText } from './embeddings.ts';
 import { type RerankStats, maybeRerank } from './rerank.ts';
 
 const RRF_K = 60;
@@ -307,13 +307,12 @@ export async function searchSourceChunks(
     return { ...result, hits: reranked.hits, ...reranked.stats };
   }
 
-  const embedClient = getEmbeddings();
   let qvec: number[] | null = null;
   let model: string | null = null;
   let tokens = 0;
 
-  if (embedClient) {
-    const embed = await embedClient.embed(query, { inputType: 'query' });
+  const embed = await tryEmbedText(query, { inputType: 'query', context: 'source search' });
+  if (embed.vector) {
     qvec = embed.vector;
     model = embed.model;
     tokens = embed.tokens;

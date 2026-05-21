@@ -21,6 +21,12 @@ import {
   memorySearchInput,
   memoryUpdate,
   memoryUpdateInput,
+  research,
+  researchInput,
+  researchList,
+  researchListInput,
+  researchStatus,
+  researchStatusInput,
   sourceGet,
   sourceGetInput,
   sourceIndex,
@@ -104,6 +110,37 @@ server.registerTool(
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
   (input: any) => sourceReindex(ctx, input),
+);
+
+server.registerTool(
+  'mnemis_research',
+  {
+    description:
+      'Run a full research workflow: discover web pages, academic papers and PDFs, then index the selected sources with citations.',
+    inputSchema: researchInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => research(ctx, input),
+);
+
+server.registerTool(
+  'mnemis_research_status',
+  {
+    description: 'Fetch one research run by id.',
+    inputSchema: researchStatusInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => researchStatus(ctx, input),
+);
+
+server.registerTool(
+  'mnemis_research_list',
+  {
+    description: 'List recent research runs.',
+    inputSchema: researchListInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => researchList(ctx, input),
 );
 
 server.registerTool(

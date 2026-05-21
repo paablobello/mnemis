@@ -30,14 +30,23 @@ interface FirecrawlStatusResponse {
   error?: string;
 }
 
+interface FirecrawlScrapeResponse {
+  success?: boolean;
+  data?: FirecrawlDocument;
+  error?: string;
+}
+
 interface FirecrawlDocument {
   markdown?: string;
+  warning?: string;
   metadata?: {
     title?: string;
     sourceURL?: string;
     url?: string;
     statusCode?: number;
+    contentType?: string;
     error?: string;
+    [key: string]: unknown;
   };
 }
 
@@ -392,6 +401,11 @@ export async function crawlDocsSiteNative(
       language: 'markdown',
       byteLength: new TextEncoder().encode(content).byteLength,
       modifiedAt: fetched.lastModified ?? new Date(),
+      metadata: {
+        crawler_provider: 'native',
+        source_url: url.toString(),
+        canonical_url: url.toString(),
+      },
     });
 
     for (const link of extractLinks(fetched.text, url)) {
@@ -468,6 +482,40 @@ async function waitForFirecrawlCrawl(
   return documents;
 }
 
+function firecrawlDocumentToFile(input: {
+  doc: FirecrawlDocument;
+  fallbackUrl: string;
+  fallbackTitle?: string | null;
+}): LoadedFile | null {
+  const markdown = input.doc.markdown?.trim();
+  const sourceUrl = input.doc.metadata?.sourceURL ?? input.doc.metadata?.url ?? input.fallbackUrl;
+  if (!markdown) return null;
+
+  const url = normalizeUrl(sourceUrl);
+  const path = toPathKey(url);
+  const content = markdown.startsWith('# ')
+    ? markdown
+    : `# ${input.doc.metadata?.title ?? input.fallbackTitle ?? path}\n\n${markdown}`;
+
+  return {
+    path,
+    absolutePath: url.toString(),
+    content,
+    language: 'markdown',
+    byteLength: new TextEncoder().encode(content).byteLength,
+    modifiedAt: new Date(),
+    metadata: {
+      crawler_provider: 'firecrawl',
+      firecrawl_status: input.doc.metadata?.statusCode ?? null,
+      firecrawl_content_type: input.doc.metadata?.contentType ?? null,
+      firecrawl_warning: input.doc.warning ?? null,
+      source_url: sourceUrl,
+      canonical_url: url.toString(),
+      firecrawl_metadata: input.doc.metadata ?? {},
+    },
+  };
+}
+
 export async function crawlDocsSiteWithFirecrawl(
   identifier: string,
   config: IndexSourceConfig = {},
@@ -511,28 +559,57 @@ export async function crawlDocsSiteWithFirecrawl(
   const files: LoadedFile[] = [];
 
   for (const doc of docs) {
-    const markdown = doc.markdown?.trim();
     const sourceUrl = doc.metadata?.sourceURL ?? doc.metadata?.url ?? started.url ?? identifier;
-    if (!markdown || seen.has(sourceUrl)) continue;
-
-    const url = normalizeUrl(sourceUrl);
-    const path = toPathKey(url);
+    if (seen.has(sourceUrl)) continue;
+    const file = firecrawlDocumentToFile({ doc, fallbackUrl: sourceUrl });
+    if (!file) continue;
+    const path = file.path;
     if (!shouldIncludePath(path, config)) continue;
 
     seen.add(sourceUrl);
-    files.push({
-      path,
-      absolutePath: url.toString(),
-      content: markdown.startsWith('# ')
-        ? markdown
-        : `# ${doc.metadata?.title ?? path}\n\n${markdown}`,
-      language: 'markdown',
-      byteLength: new TextEncoder().encode(markdown).byteLength,
-      modifiedAt: new Date(),
-    });
+    files.push(file);
   }
 
   return files;
+}
+
+export async function crawlWebPageWithFirecrawl(
+  identifier: string,
+  config: IndexSourceConfig = {},
+): Promise<LoadedFile[]> {
+  const apiKey = firecrawlKey();
+  if (!apiKey) {
+    throw new Error('firecrawl_not_configured: set FIRECRAWL_API_KEY or use docsCrawler=native');
+  }
+
+  const apiUrl = firecrawlApiUrl();
+  const scraped = await firecrawlJson<FirecrawlScrapeResponse>(`${apiUrl}/scrape`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      url: identifier,
+      formats: ['markdown'],
+      onlyMainContent: true,
+      removeBase64Images: true,
+      blockAds: true,
+      timeout: 60_000,
+    }),
+  });
+
+  if (!scraped.success || !scraped.data) {
+    throw new Error(`Firecrawl scrape failed${scraped.error ? `: ${scraped.error}` : ''}`);
+  }
+
+  const file = firecrawlDocumentToFile({
+    doc: scraped.data,
+    fallbackUrl: identifier,
+  });
+  if (!file) return [];
+  return shouldIncludePath(file.path, config) ? [file] : [];
 }
 
 export async function crawlDocsSite(
@@ -549,6 +626,25 @@ export async function crawlDocsSite(
   } catch {
     return crawlDocsSiteNative(identifier, config);
   }
+}
+
+export async function crawlWebPage(
+  identifier: string,
+  config: IndexSourceConfig = {},
+): Promise<LoadedFile[]> {
+  const crawler = config.docsCrawler ?? 'auto';
+  if (crawler === 'native') return crawlDocsSiteNative(identifier, { ...config, maxPages: 1 });
+  if (crawler === 'firecrawl') return crawlWebPageWithFirecrawl(identifier, config);
+  if (!firecrawlKey()) return crawlDocsSiteNative(identifier, { ...config, maxPages: 1 });
+
+  try {
+    const files = await crawlWebPageWithFirecrawl(identifier, config);
+    if (files.length > 0) return files;
+  } catch {
+    // Fall back to the deterministic native parser when Firecrawl is unavailable,
+    // rate-limited, or returns no usable markdown.
+  }
+  return crawlDocsSiteNative(identifier, { ...config, maxPages: 1 });
 }
 
 export async function buildDocsSiteIndex(

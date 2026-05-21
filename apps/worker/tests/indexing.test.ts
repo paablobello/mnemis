@@ -4,7 +4,18 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { chunks, createDatabase, eq, jobs, sources, sql, users, workspaces } from '@mnemis/db';
+import {
+  chunks,
+  createDatabase,
+  eq,
+  jobs,
+  researchRunSources,
+  researchRuns,
+  sources,
+  sql,
+  users,
+  workspaces,
+} from '@mnemis/db';
 import { resetEmbeddingsForTests } from '@mnemis/embeddings';
 import { cronHasDueMinute, enqueueDueCronJobs } from '../src/cron.ts';
 import { processOneJob, reapStaleIndexJobs } from '../src/runner.ts';
@@ -21,6 +32,7 @@ const ORIGINAL_ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ORIGINAL_ANTHROPIC_CONTEXT_MODEL = process.env.ANTHROPIC_CONTEXT_MODEL;
 const ORIGINAL_ALLOW_LOCAL_SOURCES = process.env.MNEMIS_ALLOW_LOCAL_SOURCES;
 const ORIGINAL_LOCAL_SOURCE_ROOTS = process.env.MNEMIS_LOCAL_SOURCE_ROOTS;
+const ORIGINAL_PDF_EXTRACTOR_URL = process.env.MNEMIS_PDF_EXTRACTOR_URL;
 const ORIGINAL_FETCH = globalThis.fetch;
 const CLAIM_FIRST = new Date('2000-01-01T00:00:00.000Z');
 
@@ -98,6 +110,11 @@ afterEach(() => {
   unsetVoyageKey();
   unsetAnthropicKey();
   Reflect.deleteProperty(process.env, 'ANTHROPIC_CONTEXT_MODEL');
+  if (ORIGINAL_PDF_EXTRACTOR_URL === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_PDF_EXTRACTOR_URL');
+  } else {
+    process.env.MNEMIS_PDF_EXTRACTOR_URL = ORIGINAL_PDF_EXTRACTOR_URL;
+  }
   resetEmbeddingsForTests();
 });
 
@@ -127,6 +144,11 @@ after(async () => {
     Reflect.deleteProperty(process.env, 'MNEMIS_LOCAL_SOURCE_ROOTS');
   } else {
     process.env.MNEMIS_LOCAL_SOURCE_ROOTS = ORIGINAL_LOCAL_SOURCE_ROOTS;
+  }
+  if (ORIGINAL_PDF_EXTRACTOR_URL === undefined) {
+    Reflect.deleteProperty(process.env, 'MNEMIS_PDF_EXTRACTOR_URL');
+  } else {
+    process.env.MNEMIS_PDF_EXTRACTOR_URL = ORIGINAL_PDF_EXTRACTOR_URL;
   }
   resetEmbeddingsForTests();
 
@@ -597,6 +619,231 @@ describe('index worker', () => {
       .from(chunks)
       .where(sql`${chunks.bodyTsv} @@ websearch_to_tsquery('english', ${'crawled docs'})`);
     assert.ok(fts.length >= 1);
+  });
+
+  it('runs research jobs from seed URLs and indexes web pages', async () => {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      if (href.endsWith('/robots.txt') || href.endsWith('/sitemap.xml')) {
+        return new Response('', { status: 404 });
+      }
+      if (href === 'https://research.worker.test/state-of-the-art') {
+        return htmlResponse(
+          html(
+            'State of the Art',
+            '<article><h1>State of the Art</h1><p>Modern research agents discover papers, blogs, and PDFs before indexing citations.</p></article>',
+          ),
+        );
+      }
+      return new Response('', { status: 404 });
+    };
+
+    const [run] = await db
+      .insert(researchRuns)
+      .values({
+        workspaceId,
+        query: 'state of the art research agents',
+        depth: 'quick',
+        status: 'queued',
+        config: {
+          depth: 'quick',
+          maxSources: 1,
+          includeWeb: false,
+          includePapers: false,
+          includePdfs: true,
+          index: true,
+          urls: ['https://research.worker.test/state-of-the-art'],
+        },
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'research_run',
+        payload: { research_run_id: run!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    const processed = await processOneJob(db);
+    assert.equal(processed, true);
+
+    const [updatedRun] = await db
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.id, run!.id))
+      .limit(1);
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+    const linkedSources = await db
+      .select()
+      .from(researchRunSources)
+      .where(eq(researchRunSources.researchRunId, run!.id));
+
+    assert.equal(updatedRun!.status, 'completed');
+    assert.equal(updatedJob!.status, 'completed');
+    assert.equal(linkedSources.length, 1);
+    assert.equal(linkedSources[0]!.status, 'indexed');
+
+    const [source] = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.id, linkedSources[0]!.sourceId))
+      .limit(1);
+    assert.equal(source!.kind, 'web_page');
+    assert.equal(source!.status, 'indexed');
+
+    const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
+    assert.ok(indexedChunks.some((chunk) => chunk.rawText.includes('discover papers')));
+  });
+
+  it('classifies arxiv-style PDF seed URLs as pdf_document sources', async () => {
+    process.env.MNEMIS_PDF_EXTRACTOR_URL = 'https://pdf-sidecar.worker.test/extract';
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      if (href === 'https://arxiv.org/pdf/1706.03762') {
+        return new Response(new TextEncoder().encode('%PDF arxiv fixture'), {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'last-modified': 'Tue, 19 May 2026 10:00:00 GMT',
+          },
+        });
+      }
+      if (href === 'https://pdf-sidecar.worker.test/extract') {
+        assert.equal(init?.method, 'POST');
+        return new Response(
+          JSON.stringify({
+            title: 'Attention Paper',
+            pages: [{ page: 1, text: 'Attention heads and decoder layers are indexed.' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('', { status: 404 });
+    };
+
+    const [run] = await db
+      .insert(researchRuns)
+      .values({
+        workspaceId,
+        query: 'attention paper',
+        depth: 'quick',
+        status: 'queued',
+        config: {
+          depth: 'quick',
+          maxSources: 1,
+          includeWeb: false,
+          includePapers: false,
+          includePdfs: true,
+          index: true,
+          urls: ['https://arxiv.org/pdf/1706.03762'],
+        },
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'research_run',
+        payload: { research_run_id: run!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    const processed = await processOneJob(db);
+    assert.equal(processed, true);
+
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+    assert.equal(updatedJob!.status, 'completed');
+
+    const linkedSources = await db
+      .select()
+      .from(researchRunSources)
+      .where(eq(researchRunSources.researchRunId, run!.id));
+    assert.equal(linkedSources.length, 1);
+    assert.equal(linkedSources[0]!.status, 'indexed');
+
+    const [source] = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.id, linkedSources[0]!.sourceId))
+      .limit(1);
+    assert.equal(source!.kind, 'pdf_document');
+    assert.equal(source!.status, 'indexed');
+
+    const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
+    assert.ok(indexedChunks.some((chunk) => chunk.page === 1 && chunk.rawText.includes('decoder')));
+  });
+
+  it('indexes pdf_document sources through the sidecar extractor with page citations', async () => {
+    process.env.MNEMIS_PDF_EXTRACTOR_URL = 'https://pdf-sidecar.worker.test/extract';
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      if (href === 'https://pdf.worker.test/paper.pdf') {
+        return new Response(new TextEncoder().encode('%PDF test fixture'), {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'last-modified': 'Tue, 19 May 2026 10:00:00 GMT',
+          },
+        });
+      }
+      if (href === 'https://pdf-sidecar.worker.test/extract') {
+        assert.equal(init?.method, 'POST');
+        return new Response(
+          JSON.stringify({
+            title: 'PDF Research Paper',
+            pages: [
+              {
+                page: 1,
+                text: 'PDF extraction keeps page-level citations for state of the art research.',
+              },
+            ],
+            metadata: { doi: '10.0000/example' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('', { status: 404 });
+    };
+
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'pdf_document',
+        identifier: 'https://pdf.worker.test/paper.pdf',
+        displayName: 'PDF paper',
+        config: { pdfExtractor: 'sidecar', contextualPrefixMode: 'never' },
+        status: 'pending',
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'index_source',
+        payload: { source_id: source!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    const processed = await processOneJob(db);
+    assert.equal(processed, true);
+
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+    assert.equal(updatedJob!.status, 'completed');
+
+    const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
+    const pageChunk = indexedChunks.find(
+      (chunk) => chunk.page === 1 && /page-level citations/.test(chunk.rawText),
+    );
+    assert.ok(pageChunk);
+    assert.equal((pageChunk.metadata as { pdf_extractor?: string }).pdf_extractor, 'sidecar');
   });
 
   it('marks robots-blocked docs jobs as failed without crashing the worker', async () => {

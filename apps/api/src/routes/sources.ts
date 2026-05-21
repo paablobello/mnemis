@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { ApiError } from '../errors.ts';
 import { requireScopes } from '../middleware/auth.ts';
+import { readJsonBody } from '../middleware/body-limit.ts';
 import { jobToDto } from '../services/jobs.ts';
 import {
   createSource,
@@ -24,9 +24,7 @@ const idParam = z.string().uuid();
 
 sourcesRoutes.post('/', requireScopes('sources:write'), async (c) => {
   const auth = c.get('auth');
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = createSourceSchema.parse(body);
   const { source, job } = await createSource(auth.workspaceId, input, { scopes: auth.scopes });
   if (job) await recordUsage(c, 'index', 1, { source_id: source.id, source_kind: source.kind });

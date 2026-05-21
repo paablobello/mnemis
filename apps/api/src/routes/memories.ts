@@ -11,8 +11,8 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ApiError } from '../errors.ts';
 import { hasScope, requireScopes, scopeError } from '../middleware/auth.ts';
+import { readJsonBody } from '../middleware/body-limit.ts';
 import {
   createMemory,
   deleteMemory,
@@ -50,9 +50,7 @@ function serializeHit(hit: SearchHit, include: Set<string>) {
 
 memoriesRoutes.post('/search', requireScopes('search:read'), async (c) => {
   const auth = c.get('auth');
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = searchBodySchema.parse(body);
   const include = new Set(input.include ?? []);
   if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
@@ -75,9 +73,7 @@ memoriesRoutes.post('/search', requireScopes('search:read'), async (c) => {
 
 memoriesRoutes.post('/semantic-search', requireScopes('search:read'), async (c) => {
   const auth = c.get('auth');
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = searchBodySchema.parse(body);
   const include = new Set(input.include ?? []);
   if (include.has('embedding') && !hasScope(auth.scopes, 'memories:embedding')) {
@@ -111,9 +107,7 @@ memoriesRoutes.post('/semantic-search', requireScopes('search:read'), async (c) 
 
 memoriesRoutes.post('/', requireScopes('memories:write'), async (c) => {
   const auth = c.get('auth');
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = createMemorySchema.parse(body);
   const created = await createMemory(auth.workspaceId, input);
   await recordUsage(c, 'save', 1, { memory_id: created.id, kind: created.kind });
@@ -175,9 +169,7 @@ memoriesRoutes.get('/:id', requireScopes('memories:read'), async (c) => {
 memoriesRoutes.patch('/:id', requireScopes('memories:write'), async (c) => {
   const auth = c.get('auth');
   const id = idParam.parse(c.req.param('id'));
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = patchMemorySchema.parse(body);
   const updated = await patchMemory(auth.workspaceId, id, input);
   return c.json({ data: toDto(updated, { includeLineage: true }) });

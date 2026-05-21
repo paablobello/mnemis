@@ -13,6 +13,7 @@ export interface SearchCitation {
   path: string;
   line_start: number;
   line_end: number;
+  page: number | null;
   permalink: string | null;
   last_indexed_at: string | null;
 }
@@ -47,6 +48,18 @@ export function buildChunkPermalink(hit: ChunkSearchHit): string | null {
       null;
     return candidate || source.identifier;
   }
+  if (
+    source.kind === 'web_page' ||
+    source.kind === 'pdf_document' ||
+    source.kind === 'academic_paper'
+  ) {
+    const meta = asRecord(chunk.metadata);
+    const candidate =
+      (typeof meta.permalink === 'string' && meta.permalink) ||
+      (typeof meta.source_url === 'string' && meta.source_url) ||
+      source.identifier;
+    return chunk.page ? `${candidate.replace(/#.*$/, '')}#page=${chunk.page}` : candidate;
+  }
   return null;
 }
 
@@ -61,6 +74,7 @@ export function buildCitations(hits: ChunkSearchHit[]): SearchCitation[] {
     path: hit.chunk.path,
     line_start: hit.chunk.lineStart,
     line_end: hit.chunk.lineEnd,
+    page: hit.chunk.page,
     permalink: buildChunkPermalink(hit),
     last_indexed_at: hit.source.lastIndexedAt?.toISOString() ?? null,
   }));
@@ -95,7 +109,8 @@ export function renderSearchMarkdown(
       cite.line_start === cite.line_end
         ? `L${cite.line_start}`
         : `L${cite.line_start}-${cite.line_end}`;
-    const heading = `### [${cite.n}] \`${cite.path}\` · ${lineRange}`;
+    const location = cite.page ? `p. ${cite.page} · ${lineRange}` : lineRange;
+    const heading = `### [${cite.n}] \`${cite.path}\` · ${location}`;
     const meta = [
       cite.source_display_name,
       cite.permalink ? `[link](${cite.permalink})` : null,

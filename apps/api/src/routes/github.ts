@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { ApiError } from '../errors.ts';
 import { requireScopes } from '../middleware/auth.ts';
+import { readJsonBody } from '../middleware/body-limit.ts';
 import {
   githubInstallationToDto,
   listGitHubInstallations,
@@ -18,9 +18,7 @@ githubRoutes.get('/installations', requireScopes('sources:read'), async (c) => {
 
 githubRoutes.post('/installations', requireScopes('sources:write'), async (c) => {
   const auth = c.get('auth');
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = registerGitHubInstallationSchema.parse(body);
   const installation = await registerGitHubInstallation(auth.workspaceId, input);
   return c.json({ data: githubInstallationToDto(installation) }, 201);

@@ -37,6 +37,7 @@ export function createApp(opts: AppOptions = {}): Hono {
 
   app.route('/health', health);
 
+  app.use('/v1/webhooks/*', bodySizeLimit);
   app.route('/v1/webhooks', webhooksRoutes);
 
   app.use('/v1/*', bodySizeLimit);
@@ -49,8 +50,19 @@ export function createApp(opts: AppOptions = {}): Hono {
 
   app.onError((err, c) => {
     if (err instanceof ApiError) {
+      const body: Record<string, unknown> = { error: err.code, message: err.message };
+      if (
+        err.code === 'payload_too_large' &&
+        typeof err.details === 'object' &&
+        err.details !== null &&
+        'max_body_bytes' in err.details
+      ) {
+        body.max_body_bytes = (err.details as { max_body_bytes: unknown }).max_body_bytes;
+      } else if (err.details !== undefined) {
+        body.details = err.details;
+      }
       return c.json(
-        { error: err.code, message: err.message, details: err.details },
+        body,
         // biome-ignore lint/suspicious/noExplicitAny: hono StatusCode union
         err.status as any,
       );

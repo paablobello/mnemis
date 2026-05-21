@@ -20,6 +20,8 @@ import {
   renderMemory,
   renderMemoryList,
   renderMemorySearch,
+  renderResearchRun,
+  renderResearchRuns,
   renderSearch,
   renderSource,
   renderSourceStatus,
@@ -52,8 +54,14 @@ Usage:
                          [--crawler auto|native|firecrawl]
 
   mnemis search <query> [--mode markdown|raw|synthesized] [--limit N]
-                        [--source <uuid>] [--kind github_repo|docs_site]
+                        [--source <uuid>] [--kind <source_kind>]
                         [--path-prefix <s>]
+
+  mnemis research <query> [--depth quick|standard|deep] [--max-sources N]
+                          [--url <url>] [--no-web] [--no-papers]
+                          [--no-pdfs] [--no-index]
+  mnemis research list [--status queued|processing|completed|failed] [--limit N]
+  mnemis research get <id>
 
   mnemis memory save --kind <fact|procedural|session|working> --title <s> --summary <s>
                      [--body <s> | stdin] [--tag <t>] [--directory <s>] [--ttl N]
@@ -87,8 +95,17 @@ Environment overrides:
   MNEMIS_CREDENTIALS_FILE         Override the default path.
 `;
 
-const SOURCE_KINDS = ['github_repo', 'docs_site'] as const;
+const SOURCE_KINDS = [
+  'github_repo',
+  'docs_site',
+  'web_page',
+  'pdf_document',
+  'academic_paper',
+  'research_collection',
+] as const;
 const SOURCE_STATUSES = ['pending', 'indexing', 'indexed', 'failed'] as const;
+const RESEARCH_DEPTHS = ['quick', 'standard', 'deep'] as const;
+const RESEARCH_STATUSES = ['queued', 'processing', 'completed', 'failed'] as const;
 const INDEX_STRATEGIES = ['manual', 'webhook', 'cron'] as const;
 const MEMORY_KINDS = ['working', 'session', 'fact', 'procedural'] as const;
 const SEARCH_MODES = ['raw', 'markdown', 'synthesized'] as const;
@@ -403,6 +420,90 @@ export async function cmdSearch(argv: string[], services: CliServices): Promise<
   });
 
   out(renderSearch(response));
+  return { exitCode: 0 };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  research                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export async function cmdResearchCreate(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      depth: { type: 'string' },
+      'max-sources': { type: 'string' },
+      url: { type: 'string', multiple: true },
+      'no-web': { type: 'boolean' },
+      'no-papers': { type: 'boolean' },
+      'no-pdfs': { type: 'boolean' },
+      'no-index': { type: 'boolean' },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  const query = positionals.join(' ').trim();
+  if (!query) return fail('Expected a research query');
+
+  const depth = optionalEnum(values.depth, RESEARCH_DEPTHS, '--depth');
+  const maxSources = positiveInt(values['max-sources'], '--max-sources');
+  const client = await services.client();
+  const result = await client.research.create({
+    query,
+    depth,
+    maxSources,
+    urls: values.url as string[] | undefined,
+    includeWeb: values['no-web'] ? false : undefined,
+    includePapers: values['no-papers'] ? false : undefined,
+    includePdfs: values['no-pdfs'] ? false : undefined,
+    index: values['no-index'] ? false : undefined,
+  });
+
+  out(`Queued research run ${result.data.id} (${result.data.status}).`);
+  out(`Job: ${result.job.id} (${result.job.status}).`);
+  return { exitCode: 0 };
+}
+
+export async function cmdResearchList(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      status: { type: 'string' },
+      limit: { type: 'string' },
+      q: { type: 'string' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  const status = optionalEnum(values.status, RESEARCH_STATUSES, '--status');
+  const limit = positiveInt(values.limit, '--limit');
+  const client = await services.client();
+  const response = await client.research.list({ status, limit, q: values.q });
+  out(renderResearchRuns(response));
+  return { exitCode: 0 };
+}
+
+export async function cmdResearchGet(
+  argv: string[],
+  services: CliServices,
+): Promise<CommandResult> {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    allowPositionals: true,
+    strict: true,
+  });
+  const id = positionals[0];
+  if (!id) return fail('Expected <research_run_id>');
+  const client = await services.client();
+  const response = await client.research.get(id);
+  out(renderResearchRun(response.data));
   return { exitCode: 0 };
 }
 
@@ -824,6 +925,11 @@ export async function dispatch(argv: string[], services: CliServices): Promise<C
     if (first === 'repos' && second === 'add') return await cmdReposAdd(rest, services);
     if (first === 'docs' && second === 'add') return await cmdDocsAdd(rest, services);
     if (first === 'search') return await cmdSearch(prepend(second, rest), services);
+    if (first === 'research') {
+      if (second === 'list' || !second) return await cmdResearchList(rest, services);
+      if (second === 'get') return await cmdResearchGet(rest, services);
+      return await cmdResearchCreate(prepend(second, rest), services);
+    }
     if (first === 'memory') {
       if (second === 'save') return await cmdMemorySave(rest, services);
       if (second === 'list' || !second) return await cmdMemoryList(rest, services);

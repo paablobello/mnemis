@@ -42,6 +42,19 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: optionalString,
   VOYAGE_API_KEY: optionalString,
   COHERE_API_KEY: optionalString,
+  TAVILY_API_KEY: optionalString,
+  MNEMIS_TAVILY_API_KEY: optionalString,
+  EXA_API_KEY: optionalString,
+  MNEMIS_EXA_API_KEY: optionalString,
+  BRAVE_SEARCH_API_KEY: optionalString,
+  MNEMIS_BRAVE_SEARCH_API_KEY: optionalString,
+  SEMANTIC_SCHOLAR_API_KEY: optionalString,
+  OPENALEX_EMAIL: optionalString,
+  MNEMIS_CONTEXTUAL_PREFIX_CONCURRENCY: optionalPositiveInt,
+  MNEMIS_RESEARCH_TIMEOUT_MS: optionalPositiveInt,
+  MNEMIS_PDF_EXTRACTOR_URL: optionalUrl,
+  MNEMIS_PDF_EXTRACTOR_TIMEOUT_MS: optionalPositiveInt,
+  MNEMIS_PDF_NATIVE_MIN_CHARS: optionalPositiveInt,
 
   INTERNAL_AUTH_SECRET: z.string().min(8),
 
@@ -50,6 +63,11 @@ const envSchema = z.object({
   MNEMIS_LOCAL_SOURCE_ROOTS: optionalString,
   MNEMIS_MAX_BODY_BYTES: optionalPositiveInt,
   MNEMIS_RATE_LIMIT_PER_MINUTE: optionalPositiveInt,
+  MNEMIS_RATE_LIMIT_BACKEND: z.preprocess(
+    emptyToUndefined,
+    z.enum(['memory', 'postgres']).optional(),
+  ),
+  MNEMIS_TRUST_PROXY: envBoolean(false),
   FIRECRAWL_API_KEY: optionalString,
   FIRECRAWL_API_URL: optionalUrl,
   MNEMIS_RERANK_PROVIDER: z.preprocess(

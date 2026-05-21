@@ -10,6 +10,9 @@ import {
   memorySave,
   memorySearch,
   memoryUpdate,
+  research,
+  researchList,
+  researchStatus,
   sourceGet,
   sourceIndex,
   sourceList,
@@ -55,6 +58,23 @@ function buildClient(handler: (call: RecordedCall) => Response | Promise<Respons
   return {
     client: createMnemisClient({ apiUrl: BASE, apiKey: KEY, fetch: mock.fetch }),
     calls: mock.calls,
+  };
+}
+
+function researchRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000010',
+    workspace_id: 'ws-1',
+    query: 'state of the art',
+    depth: 'deep',
+    status: 'queued',
+    config: {},
+    result: null,
+    error: null,
+    created_at: '2026-05-20T00:00:00.000Z',
+    updated_at: '2026-05-20T00:00:00.000Z',
+    completed_at: null,
+    ...overrides,
   };
 }
 
@@ -288,6 +308,62 @@ describe('source operational tools', () => {
     assert.equal(calls[0]!.method, 'POST');
     assert.equal(calls[0]!.url, `${BASE}/v1/sources/00000000-0000-0000-0000-000000000001/reindex`);
     assert.match(result.content[0]!.text, /job-reindex/);
+  });
+});
+
+describe('research tools', () => {
+  it('mnemis_research creates a research run', async () => {
+    const { client, calls } = buildClient(() =>
+      ok({
+        data: researchRun(),
+        job: {
+          id: 'job-1',
+          kind: 'research_run',
+          status: 'queued',
+          payload: {},
+          progress: {},
+          result: null,
+          error: null,
+          scheduled_at: '2026-05-20T00:00:00.000Z',
+          started_at: null,
+          completed_at: null,
+          attempts: 0,
+        },
+      }),
+    );
+
+    const result = await research(
+      { client },
+      {
+        query: 'state of the art',
+        depth: 'deep',
+        maxSources: 20,
+        includeWeb: true,
+        includePapers: true,
+        includePdfs: true,
+        index: true,
+      },
+    );
+
+    assert.equal(calls[0]!.method, 'POST');
+    assert.equal(calls[0]!.url, `${BASE}/v1/research/runs`);
+    assert.equal((calls[0]!.body as { query: string }).query, 'state of the art');
+    assert.match(result.content[0]!.text, /Queued research run/);
+  });
+
+  it('mnemis_research_status and list read research runs', async () => {
+    const responses = [
+      { data: researchRun({ status: 'completed', result: { indexed_sources: 2 } }) },
+      { items: [researchRun()], total: 1, has_more: false },
+    ];
+    const { client, calls } = buildClient(() => ok(responses.shift()));
+    const status = await researchStatus({ client }, { id: '00000000-0000-0000-0000-000000000010' });
+    const list = await researchList({ client }, { status: 'queued', limit: 5 });
+
+    assert.equal(calls[0]!.url, `${BASE}/v1/research/runs/00000000-0000-0000-0000-000000000010`);
+    assert.equal(calls[1]!.url, `${BASE}/v1/research/runs?status=queued&limit=5`);
+    assert.match(status.content[0]!.text, /indexed: 2/);
+    assert.match(list.content[0]!.text, /Research runs/);
   });
 });
 

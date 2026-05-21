@@ -262,6 +262,75 @@ describe('sources resource', () => {
   });
 });
 
+describe('research resource', () => {
+  it('create POSTs to /v1/research/runs', async () => {
+    const { client: c, calls } = client(() =>
+      ok({
+        data: {
+          id: 'run-1',
+          workspace_id: 'ws-1',
+          query: 'state of the art',
+          depth: 'deep',
+          status: 'queued',
+          config: {},
+          result: null,
+          error: null,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+          completed_at: null,
+        },
+        job: {
+          id: 'job-1',
+          kind: 'research_run',
+          status: 'queued',
+          payload: {},
+          progress: {},
+          result: null,
+          error: null,
+          scheduled_at: '2026-05-20T00:00:00.000Z',
+          started_at: null,
+          completed_at: null,
+          attempts: 0,
+        },
+      }),
+    );
+    await c.research.create({ query: 'state of the art', depth: 'deep', maxSources: 20 });
+    assert.equal(calls[0]!.method, 'POST');
+    assert.equal(calls[0]!.url, `${BASE}/v1/research/runs`);
+    assert.deepEqual(calls[0]!.body, {
+      query: 'state of the art',
+      depth: 'deep',
+      maxSources: 20,
+    });
+  });
+
+  it('lists and gets research runs', async () => {
+    const responses = [
+      { items: [], total: 0, has_more: false },
+      {
+        data: {
+          id: 'run-1',
+          workspace_id: 'ws-1',
+          query: 'q',
+          depth: 'quick',
+          status: 'completed',
+          config: {},
+          result: {},
+          error: null,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-20T00:00:00.000Z',
+          completed_at: '2026-05-20T00:00:01.000Z',
+        },
+      },
+    ];
+    const { client: c, calls } = client(() => ok(responses.shift()));
+    await c.research.list({ status: 'completed', limit: 10 });
+    await c.research.get('run-1');
+    assert.equal(calls[0]!.url, `${BASE}/v1/research/runs?status=completed&limit=10`);
+    assert.equal(calls[1]!.url, `${BASE}/v1/research/runs/run-1`);
+  });
+});
+
 describe('search', () => {
   it('POSTs /v1/search with the input body and parses markdown', async () => {
     const { client: c, calls } = client(() =>
@@ -275,9 +344,47 @@ describe('search', () => {
         reranked: false,
         reranker_model: null,
         reranker_tokens: 0,
-        items: [],
-        citations: [],
-        count: 0,
+        items: [
+          {
+            id: 'chunk-1',
+            source_id: 'src-1',
+            source_kind: 'github_repo',
+            source_identifier: 'acme/repo',
+            source_display_name: 'acme/repo',
+            path: 'src/index.ts',
+            line_start: 1,
+            line_end: 8,
+            citation_number: 1,
+            permalink: 'https://github.com/acme/repo/blob/main/src/index.ts#L1-L8',
+            page: null,
+            section_path: [],
+            raw_text: 'export const value = 1;',
+            contextual_prefix: null,
+            language: 'typescript',
+            indexed_at: '2026-05-20T00:00:00.000Z',
+            last_indexed_at: '2026-05-20T00:00:00.000Z',
+            score: 1,
+            ranks: { bm25: 1, vector: null },
+            bm25_score: 1,
+            vector_score: null,
+          },
+        ],
+        citations: [
+          {
+            n: 1,
+            chunk_id: 'chunk-1',
+            source_id: 'src-1',
+            source_kind: 'github_repo',
+            source_identifier: 'acme/repo',
+            source_display_name: 'acme/repo',
+            path: 'src/index.ts',
+            line_start: 1,
+            line_end: 8,
+            permalink: 'https://github.com/acme/repo/blob/main/src/index.ts#L1-L8',
+            last_indexed_at: '2026-05-20T00:00:00.000Z',
+          },
+        ],
+        count: 1,
         markdown: '# Results',
       }),
     );
@@ -285,6 +392,9 @@ describe('search', () => {
     assert.equal(calls[0]!.method, 'POST');
     assert.equal(calls[0]!.url, `${BASE}/v1/search`);
     assert.equal(res.markdown, '# Results');
+    assert.equal(res.items[0]!.id, 'chunk-1');
+    assert.equal(res.items[0]!.citation_number, 1);
+    assert.equal(res.citations[0]!.chunk_id, 'chunk-1');
   });
 });
 

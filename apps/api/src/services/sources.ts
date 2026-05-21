@@ -42,10 +42,14 @@ function redactSourceConfig(config: unknown): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
   for (const key of [
     'branch',
+    'title',
+    'sourceUrl',
+    'pdfUrl',
     'includePaths',
     'excludePaths',
     'focusInstructions',
     'maxFileBytes',
+    'maxPdfBytes',
     'chunkMaxChars',
     'chunkOverlapLines',
     'contextualPrefixMode',
@@ -54,6 +58,8 @@ function redactSourceConfig(config: unknown): Record<string, unknown> {
     'maxPages',
     'respectRobots',
     'docsCrawler',
+    'pdfExtractor',
+    'research',
   ]) {
     if (raw[key] !== undefined) safe[key] = raw[key];
   }
@@ -83,6 +89,7 @@ export function sourceToDto(source: Source): SourceDto {
 function normalizeIdentifier(kind: SourceKindInput, identifier: string): string {
   const trimmed = identifier.trim();
   if (kind === 'github_repo') return trimmed.toLowerCase();
+  if (kind === 'research_collection') return trimmed;
   const url = new URL(trimmed);
   url.hash = '';
   return url.toString().replace(/\/$/, '');
@@ -90,7 +97,9 @@ function normalizeIdentifier(kind: SourceKindInput, identifier: string): string 
 
 function defaultDisplayName(kind: SourceKindInput, identifier: string): string {
   if (kind === 'github_repo') return identifier;
-  return new URL(identifier).hostname;
+  if (kind === 'research_collection') return identifier.slice(0, 120);
+  const url = new URL(identifier);
+  return url.pathname && url.pathname !== '/' ? `${url.hostname}${url.pathname}` : url.hostname;
 }
 
 function indexJobPayload(source: Source): Record<string, unknown> {
@@ -189,16 +198,16 @@ function isPrivateHost(hostname: string): boolean {
   return false;
 }
 
-function validateDocsIdentifier(identifier: string): void {
+function validateRemoteIdentifier(kind: SourceKindInput, identifier: string): void {
   if (process.env.MNEMIS_MODE !== 'cloud') return;
   const url = new URL(identifier);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw ApiError.badRequest('docs_url_not_allowed', 'docs_site identifier must be http or https');
+    throw ApiError.badRequest('source_url_not_allowed', `${kind} identifier must be http or https`);
   }
   if (isPrivateHost(url.hostname)) {
     throw ApiError.badRequest(
-      'docs_url_not_allowed',
-      'docs_site identifier cannot target private hosts in cloud mode',
+      'source_url_not_allowed',
+      `${kind} identifier cannot target private hosts in cloud mode`,
     );
   }
 }
@@ -209,7 +218,12 @@ async function validateSourceConfig(
   scopes: readonly string[],
 ): Promise<void> {
   const config = asRecord(input.config);
-  if (input.kind === 'docs_site') validateDocsIdentifier(input.identifier);
+  if (input.kind !== 'github_repo' && input.kind !== 'research_collection') {
+    validateRemoteIdentifier(input.kind, input.identifier);
+  }
+  for (const key of ['sourceUrl', 'pdfUrl']) {
+    if (typeof config[key] === 'string') validateRemoteIdentifier(input.kind, config[key]);
+  }
   if (typeof config.localPath === 'string') {
     validateLocalPath(config.localPath, scopes);
   }

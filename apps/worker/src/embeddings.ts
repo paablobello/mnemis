@@ -49,18 +49,27 @@ function hashText(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
+function withoutEmbedding(chunk: IndexChunk): EmbeddedIndexChunk {
+  return {
+    ...chunk,
+    embedding: null,
+    embeddingModel: null,
+    embeddingTextHash: null,
+  };
+}
+
+function providerFailureReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/\s+/g, ' ').trim().slice(0, 240) || 'unknown provider error';
+}
+
 export async function embedChunksForIndexing(
   chunks: IndexChunk[],
 ): Promise<{ chunks: EmbeddedIndexChunk[]; stats: ChunkEmbeddingStats }> {
   const client = getEmbeddings();
   if (!client) {
     return {
-      chunks: chunks.map((chunk) => ({
-        ...chunk,
-        embedding: null,
-        embeddingModel: null,
-        embeddingTextHash: null,
-      })),
+      chunks: chunks.map(withoutEmbedding),
       stats: {
         enabled: false,
         embedded: 0,
@@ -77,12 +86,7 @@ export async function embedChunksForIndexing(
 
   chunks.forEach((chunk, index) => {
     if (chunk.metadata.retrieval_role === 'parent') {
-      out[index] = {
-        ...chunk,
-        embedding: null,
-        embeddingModel: null,
-        embeddingTextHash: null,
-      };
+      out[index] = withoutEmbedding(chunk);
       return;
     }
     const model = modelForChunk(chunk);
@@ -95,12 +99,23 @@ export async function embedChunksForIndexing(
   let totalTokens = 0;
   let cacheHits = 0;
   const modelCounts: Partial<Record<VoyageModel, number>> = {};
+  let skippedReason: string | null = null;
 
   for (const [model, items] of groups) {
-    const result = await client.embedBatch(
-      items.map((item) => item.text),
-      { inputType: 'document', model },
-    );
+    let result: Awaited<ReturnType<typeof client.embedBatch>>;
+    try {
+      result = await client.embedBatch(
+        items.map((item) => item.text),
+        { inputType: 'document', model },
+      );
+    } catch (err) {
+      skippedReason ??= providerFailureReason(err);
+      for (const item of items) {
+        out[item.index] = withoutEmbedding(chunks[item.index]!);
+      }
+      continue;
+    }
+
     totalTokens += result.totalTokens;
     cacheHits += result.cacheHits;
     modelCounts[model] = items.length;
@@ -125,7 +140,7 @@ export async function embedChunksForIndexing(
       totalTokens,
       cacheHits,
       modelCounts,
-      skippedReason: null,
+      skippedReason,
     },
   };
 }

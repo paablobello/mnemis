@@ -2,7 +2,14 @@ import { usageEvents } from '@mnemis/db';
 import type { Context } from 'hono';
 import { getDb } from '../db.ts';
 
-export type UsageKind = 'request' | 'search' | 'save' | 'index' | 'rerank' | 'synthesize';
+export type UsageKind =
+  | 'request'
+  | 'search'
+  | 'save'
+  | 'index'
+  | 'research'
+  | 'rerank'
+  | 'synthesize';
 
 export async function recordUsage(
   c: Context,

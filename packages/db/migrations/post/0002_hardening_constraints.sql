@@ -13,7 +13,14 @@ ALTER TABLE workspace_members
 ALTER TABLE sources
   DROP CONSTRAINT IF EXISTS sources_kind_check,
   ADD CONSTRAINT sources_kind_check
-    CHECK (kind IN ('github_repo', 'docs_site'));
+    CHECK (kind IN (
+      'github_repo',
+      'docs_site',
+      'web_page',
+      'pdf_document',
+      'academic_paper',
+      'research_collection'
+    ));
 
 ALTER TABLE sources
   DROP CONSTRAINT IF EXISTS sources_status_check,
@@ -38,7 +45,7 @@ ALTER TABLE memories
 ALTER TABLE jobs
   DROP CONSTRAINT IF EXISTS jobs_kind_check,
   ADD CONSTRAINT jobs_kind_check
-    CHECK (kind IN ('index_source', 'reindex_source', 'embed_chunks', 'rerank_warmup'));
+    CHECK (kind IN ('index_source', 'reindex_source', 'research_run', 'embed_chunks', 'rerank_warmup'));
 
 ALTER TABLE jobs
   DROP CONSTRAINT IF EXISTS jobs_status_check,
@@ -48,4 +55,19 @@ ALTER TABLE jobs
 ALTER TABLE usage_events
   DROP CONSTRAINT IF EXISTS usage_events_kind_check,
   ADD CONSTRAINT usage_events_kind_check
-    CHECK (kind IN ('request', 'search', 'save', 'index', 'rerank', 'synthesize'));
+    CHECK (kind IN ('request', 'search', 'save', 'index', 'research', 'rerank', 'synthesize'));
+
+ALTER TABLE research_runs
+  DROP CONSTRAINT IF EXISTS research_runs_depth_check,
+  ADD CONSTRAINT research_runs_depth_check
+    CHECK (depth IN ('quick', 'standard', 'deep'));
+
+ALTER TABLE research_runs
+  DROP CONSTRAINT IF EXISTS research_runs_status_check,
+  ADD CONSTRAINT research_runs_status_check
+    CHECK (status IN ('queued', 'processing', 'completed', 'failed'));
+
+ALTER TABLE research_run_sources
+  DROP CONSTRAINT IF EXISTS research_run_sources_status_check,
+  ADD CONSTRAINT research_run_sources_status_check
+    CHECK (status IN ('pending', 'indexed', 'failed', 'skipped'));

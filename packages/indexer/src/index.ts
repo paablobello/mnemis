@@ -1,7 +1,8 @@
 export { chunkFile, chunkFiles } from './chunker.ts';
-export { buildDocsSiteIndex, crawlDocsSite } from './docs.ts';
+export { buildDocsSiteIndex, crawlDocsSite, crawlWebPage } from './docs.ts';
 export { collectLocalFiles } from './files.ts';
 export { detectLanguage } from './language.ts';
+export { buildPdfDocumentIndex, buildWebPageIndex } from './web.ts';
 export type { BuildIndexResult, IndexChunk, IndexSourceConfig, LoadedFile } from './types.ts';
 
 import { chunkFiles } from './chunker.ts';

@@ -3,10 +3,12 @@ import type {
   ChunkSearchInput,
   ChunkSearchResponse,
   CreateMemoryInput,
+  CreateResearchRunInput,
   CreateSourceInput,
   GitHubInstallationDto,
   JobDto,
   ListMemoriesQuery,
+  ListResearchRunsQuery,
   ListSourcesQuery,
   MemoryDto,
   MemoryListResponse,
@@ -14,6 +16,8 @@ import type {
   MemorySearchResponse,
   PatchMemoryInput,
   RegisterGitHubInstallationInput,
+  ResearchRunDto,
+  ResearchRunListResponse,
   SourceDto,
   SourceListResponse,
   SourceStatusDto,
@@ -181,6 +185,11 @@ export interface MnemisClient {
       options?: { signal?: AbortSignal },
     ): Promise<void>;
     reindex(id: string): Promise<{ job: JobDto }>;
+  };
+  research: {
+    create(input: CreateResearchRunInput): Promise<{ data: ResearchRunDto; job: JobDto }>;
+    list(query?: ListResearchRunsQuery): Promise<ResearchRunListResponse>;
+    get(id: string): Promise<{ data: ResearchRunDto }>;
   };
   github: {
     listInstallations(): Promise<{ items: GitHubInstallationDto[] }>;
@@ -369,6 +378,28 @@ export function createMnemisClient(options: MnemisClientOptions): MnemisClient {
           method: 'POST',
           path: '/v1/github/installations',
           body: input,
+        });
+      },
+    },
+    research: {
+      create(input) {
+        return raw.request<{ data: ResearchRunDto; job: JobDto }>({
+          method: 'POST',
+          path: '/v1/research/runs',
+          body: input,
+        });
+      },
+      list(query) {
+        return raw.request<ResearchRunListResponse>({
+          method: 'GET',
+          path: '/v1/research/runs',
+          query: query as Record<string, string | number | boolean | undefined | null>,
+        });
+      },
+      get(id) {
+        return raw.request<{ data: ResearchRunDto }>({
+          method: 'GET',
+          path: `/v1/research/runs/${encodeURIComponent(id)}`,
         });
       },
     },

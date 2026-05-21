@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import { apiKeys, createDatabase, eq, users, workspaces } from '@mnemis/db';
 import { createApp } from '../src/app.ts';
+import { registerGitHubInstallation } from '../src/services/github-installations.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL required for integration tests');
@@ -152,6 +153,68 @@ describe('GitHub App installations API', () => {
     assert.equal(res.status, 409);
     const json = await res.json();
     assert.equal(json.error, 'github_installation_claimed');
+  });
+
+  it('uses verified GitHub App metadata when a verifier is available', async () => {
+    const verifiedInstallationId = String(500_000 + randomBytes(4).readUInt32BE(0));
+    const installedAt = new Date('2026-05-18T12:00:00.000Z');
+    const installation = await registerGitHubInstallation(
+      workspaceId,
+      {
+        installationId: verifiedInstallationId,
+        accountLogin: 'VerifiedOrg',
+        accountType: 'Organization',
+        repositorySelection: 'all',
+        permissions: { metadata: 'read' },
+        events: [],
+      },
+      {
+        verifyInstallation: async (installationId) => {
+          assert.equal(installationId, verifiedInstallationId);
+          return {
+            accountLogin: 'VerifiedOrg',
+            accountType: 'Organization',
+            repositorySelection: 'all',
+            permissions: { contents: 'read', metadata: 'read' },
+            events: ['push'],
+            installedAt,
+            suspendedAt: null,
+          };
+        },
+      },
+    );
+
+    assert.equal(installation.accountLogin, 'verifiedorg');
+    assert.equal(installation.repositorySelection, 'all');
+    assert.deepEqual(installation.events, ['push']);
+    assert.deepEqual(installation.permissions, { contents: 'read', metadata: 'read' });
+    assert.equal(installation.installedAt?.toISOString(), installedAt.toISOString());
+
+    await assert.rejects(
+      registerGitHubInstallation(
+        workspaceId,
+        {
+          installationId: String(600_000 + randomBytes(4).readUInt32BE(0)),
+          accountLogin: 'WrongOrg',
+        },
+        {
+          verifyInstallation: async () => ({
+            accountLogin: 'VerifiedOrg',
+            accountType: 'Organization',
+            repositorySelection: 'selected',
+            permissions: {},
+            events: [],
+            installedAt: null,
+            suspendedAt: null,
+          }),
+        },
+      ),
+      (err: unknown) =>
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        err.code === 'github_installation_account_mismatch',
+    );
   });
 
   it('validates source config references to workspace-linked installations', async () => {

@@ -1,10 +1,18 @@
 /* DTOs returned by the Mnemis HTTP API. Mirror apps/api response shapes. */
 
 export type MemoryKind = 'working' | 'session' | 'fact' | 'procedural';
-export type SourceKind = 'github_repo' | 'docs_site';
+export type SourceKind =
+  | 'github_repo'
+  | 'docs_site'
+  | 'web_page'
+  | 'pdf_document'
+  | 'academic_paper'
+  | 'research_collection';
 export type SourceStatus = 'pending' | 'indexing' | 'indexed' | 'failed';
 export type IndexStrategy = 'manual' | 'webhook' | 'cron';
 export type SearchMode = 'raw' | 'markdown' | 'synthesized';
+export type ResearchDepth = 'quick' | 'standard' | 'deep';
+export type ResearchRunStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
 export interface EditedFile {
   path: string;
@@ -165,6 +173,44 @@ export interface SourceStatusDto {
   latest_job: JobDto | null;
 }
 
+export interface ResearchRunDto {
+  id: string;
+  workspace_id: string;
+  query: string;
+  depth: ResearchDepth;
+  status: ResearchRunStatus;
+  config: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface CreateResearchRunInput {
+  query: string;
+  depth?: ResearchDepth;
+  maxSources?: number;
+  includeWeb?: boolean;
+  includePapers?: boolean;
+  includePdfs?: boolean;
+  index?: boolean;
+  urls?: string[];
+}
+
+export interface ListResearchRunsQuery {
+  status?: ResearchRunStatus;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ResearchRunListResponse {
+  items: ResearchRunDto[];
+  total: number;
+  has_more: boolean;
+}
+
 export interface CreateSourceInput {
   kind: SourceKind;
   identifier: string;
@@ -172,10 +218,14 @@ export interface CreateSourceInput {
   config?: {
     branch?: string;
     githubInstallationId?: string;
+    title?: string;
+    sourceUrl?: string;
+    pdfUrl?: string;
     includePaths?: string[];
     excludePaths?: string[];
     focusInstructions?: string;
     maxFileBytes?: number;
+    maxPdfBytes?: number;
     chunkMaxChars?: number;
     chunkOverlapLines?: number;
     contextualPrefixMode?: 'auto' | 'always' | 'never';
@@ -184,6 +234,8 @@ export interface CreateSourceInput {
     maxPages?: number;
     respectRobots?: boolean;
     docsCrawler?: 'auto' | 'native' | 'firecrawl';
+    pdfExtractor?: 'auto' | 'native' | 'sidecar';
+    research?: Record<string, unknown>;
   };
   indexStrategy?: IndexStrategy;
   cronSchedule?: string | null;
@@ -228,18 +280,28 @@ export interface ChunkSearchCitation {
   n: number;
   chunk_id: string;
   source_id: string;
-  source_kind: string;
+  source_kind: SourceKind;
   source_identifier: string;
   source_display_name: string;
   path: string;
   line_start: number;
   line_end: number;
+  page: number | null;
   permalink: string | null;
   last_indexed_at: string | null;
 }
 
-export interface ChunkSearchItem extends ChunkSearchCitation {
+export interface ChunkSearchItem {
+  id: string;
+  source_id: string;
+  source_kind: SourceKind;
+  source_identifier: string;
+  source_display_name: string;
+  path: string;
+  line_start: number;
+  line_end: number;
   citation_number: number;
+  permalink: string | null;
   page: number | null;
   section_path: string[];
   raw_text?: string;
@@ -247,6 +309,7 @@ export interface ChunkSearchItem extends ChunkSearchCitation {
   language: string | null;
   metadata?: unknown;
   indexed_at: string;
+  last_indexed_at: string | null;
   score: number;
   ranks: { bm25: number | null; vector: number | null };
   bm25_score: number | null;

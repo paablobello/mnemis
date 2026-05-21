@@ -64,6 +64,16 @@ CREATE TRIGGER sources_updated_at_trg
   BEFORE UPDATE ON sources
   FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
 
+DROP TRIGGER IF EXISTS research_runs_updated_at_trg ON research_runs;
+CREATE TRIGGER research_runs_updated_at_trg
+  BEFORE UPDATE ON research_runs
+  FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
+
+DROP TRIGGER IF EXISTS research_run_sources_updated_at_trg ON research_run_sources;
+CREATE TRIGGER research_run_sources_updated_at_trg
+  BEFORE UPDATE ON research_run_sources
+  FOR EACH ROW EXECUTE FUNCTION mnemis_set_updated_at();
+
 DROP TRIGGER IF EXISTS github_app_installations_updated_at_trg ON github_app_installations;
 CREATE TRIGGER github_app_installations_updated_at_trg
   BEFORE UPDATE ON github_app_installations

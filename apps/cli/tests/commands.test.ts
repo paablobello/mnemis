@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import type {
   ChunkSearchResponse,
   CreateMemoryInput,
+  CreateResearchRunInput,
   CreateSourceInput,
   GitHubInstallationDto,
   JobDto,
@@ -13,6 +14,7 @@ import type {
   MemorySearchResponse,
   MnemisClient,
   PatchMemoryInput,
+  ResearchRunDto,
   SourceDto,
   SourceListResponse,
   SourceStatusDto,
@@ -94,6 +96,23 @@ function githubInstallation(overrides: Partial<GitHubInstallationDto> = {}): Git
     deleted_at: null,
     created_at: '2026-05-20T00:00:00.000Z',
     updated_at: '2026-05-20T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function researchRun(overrides: Partial<ResearchRunDto> = {}): ResearchRunDto {
+  return {
+    id: 'run-1',
+    workspace_id: 'workspace-1',
+    query: 'state of the art',
+    depth: 'deep',
+    status: 'queued',
+    config: {},
+    result: null,
+    error: null,
+    created_at: '2026-05-20T00:00:00.000Z',
+    updated_at: '2026-05-20T00:00:00.000Z',
+    completed_at: null,
     ...overrides,
   };
 }
@@ -360,6 +379,70 @@ describe('source commands', () => {
     assert.equal(reindex.result.exitCode, 0);
     assert.match(reindex.stdout, /job-reindex/);
     assert.deepEqual(calls, ['get:source-1', 'reindex:source-1']);
+  });
+});
+
+describe('research commands', () => {
+  it('creates, lists and gets research runs', async () => {
+    const inputs: CreateResearchRunInput[] = [];
+    const calls: string[] = [];
+    const svc = services({
+      research: {
+        async create(value: CreateResearchRunInput) {
+          inputs.push(value);
+          return { data: researchRun(), job: job({ kind: 'research_run' }) };
+        },
+        async list(query) {
+          calls.push(`list:${query?.status ?? ''}:${query?.limit ?? ''}`);
+          return { items: [researchRun()], total: 1, has_more: false };
+        },
+        async get(id: string) {
+          calls.push(`get:${id}`);
+          return { data: researchRun({ id, status: 'completed', result: { indexed_sources: 2 } }) };
+        },
+      } as MnemisClient['research'],
+    });
+
+    const created = await capture(() =>
+      dispatch(
+        [
+          'research',
+          'state',
+          'of',
+          'the',
+          'art',
+          '--depth',
+          'deep',
+          '--max-sources',
+          '20',
+          '--url',
+          'https://example.com/paper.pdf',
+        ],
+        svc,
+      ),
+    );
+    const listed = await capture(() =>
+      dispatch(['research', 'list', '--status', 'queued', '--limit', '5'], svc),
+    );
+    const got = await capture(() => dispatch(['research', 'get', 'run-1'], svc));
+
+    assert.equal(created.result.exitCode, 0);
+    assert.deepEqual(inputs[0], {
+      query: 'state of the art',
+      depth: 'deep',
+      maxSources: 20,
+      urls: ['https://example.com/paper.pdf'],
+      includeWeb: undefined,
+      includePapers: undefined,
+      includePdfs: undefined,
+      index: undefined,
+    });
+    assert.equal(listed.result.exitCode, 0);
+    assert.equal(got.result.exitCode, 0);
+    assert.deepEqual(calls, ['list:queued:5', 'get:run-1']);
+    assert.match(created.stdout, /Queued research run/);
+    assert.match(listed.stdout, /Research runs/);
+    assert.match(got.stdout, /indexed:\s+2/);
   });
 });
 

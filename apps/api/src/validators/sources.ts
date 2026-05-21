@@ -1,7 +1,14 @@
 import { z } from 'zod';
 import { githubInstallationIdSchema } from './github.ts';
 
-export const sourceKindSchema = z.enum(['github_repo', 'docs_site']);
+export const sourceKindSchema = z.enum([
+  'github_repo',
+  'docs_site',
+  'web_page',
+  'pdf_document',
+  'academic_paper',
+  'research_collection',
+]);
 export type SourceKindInput = z.infer<typeof sourceKindSchema>;
 
 export const sourceStatusSchema = z.enum(['pending', 'indexing', 'indexed', 'failed']);
@@ -20,11 +27,15 @@ const githubRepoIdentifier = z
   );
 
 const docsSiteIdentifier = z.string().url().max(2_000);
+const webIdentifier = z.string().url().max(2_000);
 
 export const sourceConfigSchema = z
   .object({
     branch: z.string().min(1).max(255).optional(),
     githubInstallationId: githubInstallationIdSchema.optional(),
+    title: z.string().min(1).max(1_000).optional(),
+    sourceUrl: z.string().url().max(2_000).optional(),
+    pdfUrl: z.string().url().max(2_000).optional(),
     includePaths: z.array(z.string().min(1).max(1_000)).max(256).optional(),
     excludePaths: z.array(z.string().min(1).max(1_000)).max(256).optional(),
     focusInstructions: z.string().min(1).max(4_000).optional(),
@@ -35,6 +46,12 @@ export const sourceConfigSchema = z
       .positive()
       .max(10 * 1024 * 1024)
       .optional(),
+    maxPdfBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(100 * 1024 * 1024)
+      .optional(),
     chunkMaxChars: z.number().int().min(500).max(20_000).optional(),
     chunkOverlapLines: z.number().int().min(0).max(50).optional(),
     contextualPrefixMode: z.enum(['auto', 'always', 'never']).optional(),
@@ -43,6 +60,8 @@ export const sourceConfigSchema = z
     maxPages: z.number().int().positive().max(50_000).optional(),
     respectRobots: z.boolean().optional(),
     docsCrawler: z.enum(['auto', 'native', 'firecrawl']).optional(),
+    pdfExtractor: z.enum(['auto', 'native', 'sidecar']).optional(),
+    research: z.record(z.unknown()).optional(),
   })
   .strict();
 
@@ -61,7 +80,11 @@ export const createSourceSchema = z
     const parsed =
       value.kind === 'github_repo'
         ? githubRepoIdentifier.safeParse(value.identifier)
-        : docsSiteIdentifier.safeParse(value.identifier);
+        : value.kind === 'research_collection'
+          ? z.string().min(1).max(2_000).safeParse(value.identifier)
+          : value.kind === 'docs_site'
+            ? docsSiteIdentifier.safeParse(value.identifier)
+            : webIdentifier.safeParse(value.identifier);
 
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
@@ -113,7 +136,7 @@ export const sourceSearchSchema = z
     mode: searchModeSchema.optional().default('raw'),
     synthesisModel: z.string().min(1).max(200).optional(),
     sourceIds: z.array(z.string().uuid()).max(100).optional(),
-    kinds: z.array(sourceKindSchema).max(2).optional(),
+    kinds: z.array(sourceKindSchema).max(6).optional(),
     pathPrefix: z.string().min(1).max(1_000).optional(),
     limit: z.number().int().min(1).max(50).optional().default(10),
     include: z

@@ -34,6 +34,11 @@ export class ApiError extends Error {
   static failedDependency(code: string, message: string) {
     return new ApiError(424, code, message);
   }
+  static payloadTooLarge(maxBodyBytes: number) {
+    return new ApiError(413, 'payload_too_large', `Request body exceeds ${maxBodyBytes} bytes`, {
+      max_body_bytes: maxBodyBytes,
+    });
+  }
   static internal(message = 'Internal server error') {
     return new ApiError(500, 'internal_error', message);
   }

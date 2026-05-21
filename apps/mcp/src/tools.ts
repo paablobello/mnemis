@@ -6,6 +6,8 @@ import type {
   MemoryListResponse,
   MemorySearchResponse,
   MnemisClient,
+  ResearchRunDto,
+  ResearchRunListResponse,
   SourceDto,
   SourceListResponse,
   SourceStatusDto,
@@ -139,6 +141,35 @@ function renderSourceStatus(status: SourceStatusDto): string {
   return lines.join('\n');
 }
 
+function renderResearchRun(run: ResearchRunDto): string {
+  const lines: string[] = [];
+  lines.push(`## ${run.query} — \`${run.status}\``);
+  lines.push(`_id: \`${run.id}\` · depth: \`${run.depth}\` · created: ${run.created_at}_`);
+  if (run.completed_at) lines.push(`_completed: ${run.completed_at}_`);
+  if (run.error) lines.push(`> ${run.error}`);
+  if (run.result) {
+    const indexed = run.result.indexed_sources;
+    const failed = run.result.failed_sources;
+    const details = [
+      typeof indexed === 'number' ? `indexed: ${indexed}` : null,
+      typeof failed === 'number' ? `failed: ${failed}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    if (details) lines.push(details);
+  }
+  return lines.join('\n');
+}
+
+function renderResearchRunList(response: ResearchRunListResponse): string {
+  if (response.items.length === 0) return '_No research runs found._';
+  const lines: string[] = [`# Research runs (${response.items.length} of ${response.total})`, ''];
+  for (const run of response.items) {
+    lines.push(renderResearchRun(run), '');
+  }
+  return lines.join('\n').trimEnd();
+}
+
 function renderJob(job: JobDto): string {
   return `job: \`${job.id}\` · kind: ${job.kind} · status: ${job.status}`;
 }
@@ -196,8 +227,17 @@ export const sourceSearchInput = {
     .optional()
     .describe('Restrict to these source UUIDs'),
   kinds: z
-    .array(z.enum(['github_repo', 'docs_site']))
-    .max(2)
+    .array(
+      z.enum([
+        'github_repo',
+        'docs_site',
+        'web_page',
+        'pdf_document',
+        'academic_paper',
+        'research_collection',
+      ]),
+    )
+    .max(6)
     .optional()
     .describe('Restrict to these source kinds'),
   pathPrefix: z
@@ -215,7 +255,14 @@ export async function sourceSearch(
     mode: 'markdown' | 'raw' | 'synthesized';
     limit?: number;
     sourceIds?: string[];
-    kinds?: Array<'github_repo' | 'docs_site'>;
+    kinds?: Array<
+      | 'github_repo'
+      | 'docs_site'
+      | 'web_page'
+      | 'pdf_document'
+      | 'academic_paper'
+      | 'research_collection'
+    >;
     pathPrefix?: string;
   },
 ): Promise<ToolResult> {
@@ -235,12 +282,21 @@ export async function sourceSearch(
 /* -------------------------------------------------------------------------- */
 
 export const sourceIndexInput = {
-  kind: z.enum(['github_repo', 'docs_site']).describe('Source type'),
+  kind: z
+    .enum([
+      'github_repo',
+      'docs_site',
+      'web_page',
+      'pdf_document',
+      'academic_paper',
+      'research_collection',
+    ])
+    .describe('Source type'),
   identifier: z
     .string()
     .min(1)
     .max(2_000)
-    .describe('owner/repo for github_repo, full URL for docs_site'),
+    .describe('owner/repo for github_repo, URL for web/docs/PDF/paper sources'),
   displayName: z.string().min(1).max(255).optional().describe('Human-readable name'),
   branch: z.string().min(1).max(255).optional().describe('Git branch (github_repo only)'),
   githubInstallationId: z
@@ -261,12 +317,22 @@ export const sourceIndexInput = {
     .enum(['auto', 'native', 'firecrawl'])
     .optional()
     .describe('Docs crawler provider for docs_site sources'),
+  pdfExtractor: z
+    .enum(['auto', 'native', 'sidecar'])
+    .optional()
+    .describe('PDF extractor for pdf_document or academic_paper sources'),
 };
 
 export async function sourceIndex(
   ctx: ToolContext,
   input: {
-    kind: 'github_repo' | 'docs_site';
+    kind:
+      | 'github_repo'
+      | 'docs_site'
+      | 'web_page'
+      | 'pdf_document'
+      | 'academic_paper'
+      | 'research_collection';
     identifier: string;
     displayName?: string;
     branch?: string;
@@ -274,16 +340,19 @@ export async function sourceIndex(
     indexStrategy?: 'manual' | 'webhook' | 'cron';
     cronSchedule?: string;
     docsCrawler?: 'auto' | 'native' | 'firecrawl';
+    pdfExtractor?: 'auto' | 'native' | 'sidecar';
   },
 ): Promise<ToolResult> {
   const config: {
     branch?: string;
     githubInstallationId?: string;
     docsCrawler?: 'auto' | 'native' | 'firecrawl';
+    pdfExtractor?: 'auto' | 'native' | 'sidecar';
   } = {};
   if (input.branch) config.branch = input.branch;
   if (input.githubInstallationId) config.githubInstallationId = input.githubInstallationId;
   if (input.docsCrawler) config.docsCrawler = input.docsCrawler;
+  if (input.pdfExtractor) config.pdfExtractor = input.pdfExtractor;
 
   const response = await ctx.client.sources.create({
     kind: input.kind,
@@ -312,7 +381,17 @@ export async function sourceIndex(
 /* -------------------------------------------------------------------------- */
 
 export const sourceListInput = {
-  kind: z.enum(['github_repo', 'docs_site']).optional().describe('Filter by source kind'),
+  kind: z
+    .enum([
+      'github_repo',
+      'docs_site',
+      'web_page',
+      'pdf_document',
+      'academic_paper',
+      'research_collection',
+    ])
+    .optional()
+    .describe('Filter by source kind'),
   status: z
     .enum(['pending', 'indexing', 'indexed', 'failed'])
     .optional()
@@ -329,7 +408,13 @@ export const sourceListInput = {
 export async function sourceList(
   ctx: ToolContext,
   input: {
-    kind?: 'github_repo' | 'docs_site';
+    kind?:
+      | 'github_repo'
+      | 'docs_site'
+      | 'web_page'
+      | 'pdf_document'
+      | 'academic_paper'
+      | 'research_collection';
     status?: 'pending' | 'indexing' | 'indexed' | 'failed';
     q?: string;
     limit?: number;
@@ -364,6 +449,76 @@ export const sourceReindexInput = {
 export async function sourceReindex(ctx: ToolContext, input: { id: string }): Promise<ToolResult> {
   const response = await ctx.client.sources.reindex(input.id);
   return text(`Queued ${renderJob(response.job)}`);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  mnemis_research                                                            */
+/* -------------------------------------------------------------------------- */
+
+export const researchInput = {
+  query: z.string().min(1).max(2_000).describe('Research question or topic'),
+  depth: z.enum(['quick', 'standard', 'deep']).optional().default('standard'),
+  maxSources: z.number().int().min(1).max(50).optional().describe('Max sources to index'),
+  urls: z
+    .array(z.string().url())
+    .max(50)
+    .optional()
+    .describe('Seed URLs to force into the research run'),
+  includeWeb: z.boolean().optional().default(true).describe('Use web search providers'),
+  includePapers: z.boolean().optional().default(true).describe('Use academic paper providers'),
+  includePdfs: z.boolean().optional().default(true).describe('Allow PDF sources'),
+  index: z.boolean().optional().default(true).describe('Index discovered sources'),
+};
+
+export async function research(
+  ctx: ToolContext,
+  input: {
+    query: string;
+    depth?: 'quick' | 'standard' | 'deep';
+    maxSources?: number;
+    urls?: string[];
+    includeWeb?: boolean;
+    includePapers?: boolean;
+    includePdfs?: boolean;
+    index?: boolean;
+  },
+): Promise<ToolResult> {
+  const response = await ctx.client.research.create(input);
+  return text(
+    [
+      `Queued research run \`${response.data.id}\` (${response.data.status})`,
+      `job: \`${response.job.id}\` (${response.job.status})`,
+      '',
+      renderResearchRun(response.data),
+    ].join('\n'),
+  );
+}
+
+export const researchStatusInput = {
+  id: z.string().uuid().describe('Research run UUID'),
+};
+
+export async function researchStatus(ctx: ToolContext, input: { id: string }): Promise<ToolResult> {
+  const response = await ctx.client.research.get(input.id);
+  return text(renderResearchRun(response.data));
+}
+
+export const researchListInput = {
+  status: z.enum(['queued', 'processing', 'completed', 'failed']).optional(),
+  q: z.string().min(1).max(500).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+};
+
+export async function researchList(
+  ctx: ToolContext,
+  input: {
+    status?: 'queued' | 'processing' | 'completed' | 'failed';
+    q?: string;
+    limit?: number;
+  },
+): Promise<ToolResult> {
+  const response = await ctx.client.research.list(input);
+  return text(renderResearchRunList(response));
 }
 
 /* -------------------------------------------------------------------------- */

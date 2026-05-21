@@ -4,6 +4,8 @@ import type {
   MemoryDto,
   MemoryListResponse,
   MemorySearchResponse,
+  ResearchRunDto,
+  ResearchRunListResponse,
   SourceDto,
   SourceListResponse,
   SourceStatusDto,
@@ -115,6 +117,34 @@ export function renderMemory(memory: MemoryDto, includeBody = true): string {
 
 export function renderSource(source: SourceDto): string {
   return renderSources({ items: [source], total: 1, has_more: false });
+}
+
+export function renderResearchRun(run: ResearchRunDto): string {
+  const lines: string[] = [];
+  lines.push(`${run.query}  [${run.status}]`);
+  lines.push(`  id:        ${run.id}`);
+  lines.push(`  depth:     ${run.depth}`);
+  lines.push(`  created:   ${run.created_at}`);
+  if (run.completed_at) lines.push(`  completed: ${run.completed_at}`);
+  if (run.error) lines.push(`  error:     ${run.error}`);
+  if (run.result) {
+    const indexed = run.result.indexed_sources;
+    const failed = run.result.failed_sources;
+    if (typeof indexed === 'number') lines.push(`  indexed:   ${indexed}`);
+    if (typeof failed === 'number') lines.push(`  failed:    ${failed}`);
+  }
+  return lines.join('\n');
+}
+
+export function renderResearchRuns(response: ResearchRunListResponse): string {
+  if (response.items.length === 0) return 'No research runs found.';
+  const lines: string[] = [];
+  lines.push(`Research runs (${response.items.length} of ${response.total}):`);
+  for (const run of response.items) {
+    lines.push('');
+    lines.push(renderResearchRun(run));
+  }
+  return lines.join('\n');
 }
 
 export function renderGithubInstallations(items: GitHubInstallationDto[]): string {

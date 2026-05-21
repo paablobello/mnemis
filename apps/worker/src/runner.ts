@@ -1,7 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { delimiter, isAbsolute, relative, resolve } from 'node:path';
-import { type Database, and, chunks, eq, inArray, jobs, sources, sql } from '@mnemis/db';
-import { type IndexSourceConfig, buildDocsSiteIndex, buildLocalSourceIndex } from '@mnemis/indexer';
+import {
+  type Database,
+  type SourceKind,
+  and,
+  chunks,
+  eq,
+  inArray,
+  jobs,
+  researchRunSources,
+  researchRuns,
+  sources,
+  sql,
+} from '@mnemis/db';
+import {
+  type BuildIndexResult,
+  type IndexSourceConfig,
+  buildDocsSiteIndex,
+  buildLocalSourceIndex,
+  buildPdfDocumentIndex,
+  buildWebPageIndex,
+} from '@mnemis/indexer';
 import { applyContextualPrefixes } from './contextual-prefix.ts';
 import { enqueueDueCronJobs } from './cron.ts';
 import { type EmbeddedIndexChunk, embedChunksForIndexing } from './embeddings.ts';
@@ -13,8 +32,13 @@ import {
   createInstallationTokenStore,
 } from './github-app.ts';
 import { getActiveInstallation } from './installations.ts';
+import {
+  type ResearchCandidate,
+  discoverResearchCandidates,
+  normalizeResearchRunConfig,
+} from './research.ts';
 
-type IndexJobKind = 'index_source' | 'reindex_source';
+type WorkerJobKind = 'index_source' | 'reindex_source' | 'research_run';
 
 interface RawRows<T> {
   rows?: T[];
@@ -26,6 +50,7 @@ interface ClaimedJob {
 
 interface JobPayload {
   source_id?: string;
+  research_run_id?: string;
 }
 
 function rowsFrom<T>(result: unknown): T[] {
@@ -66,6 +91,14 @@ function asConfig(value: unknown): IndexSourceConfig {
         : undefined,
     focusInstructions:
       typeof config.focusInstructions === 'string' ? config.focusInstructions : undefined,
+    title: typeof config.title === 'string' ? config.title : undefined,
+    maxPdfBytes: typeof config.maxPdfBytes === 'number' ? config.maxPdfBytes : undefined,
+    pdfExtractor:
+      config.pdfExtractor === 'auto' ||
+      config.pdfExtractor === 'native' ||
+      config.pdfExtractor === 'sidecar'
+        ? config.pdfExtractor
+        : undefined,
     contextualPrefixMode:
       config.contextualPrefixMode === 'auto' ||
       config.contextualPrefixMode === 'always' ||
@@ -91,6 +124,15 @@ function sanitizeOperationalError(error: unknown, max = 1_000): string {
     .replace(/(api[_-]?key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
     .replace(/(token['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
     .slice(0, max);
+}
+
+function completionProgress(result: Record<string, unknown>): Record<string, unknown> {
+  const chunks = typeof result.chunks === 'number' ? result.chunks : null;
+  const indexedSources = typeof result.indexed_sources === 'number' ? result.indexed_sources : null;
+  const candidates = typeof result.candidates === 'number' ? result.candidates : null;
+  const done = chunks ?? indexedSources ?? candidates ?? 0;
+  const total = chunks ?? candidates ?? indexedSources ?? done;
+  return { done, total, current: 'completed' };
 }
 
 function localSourceRoots(): string[] {
@@ -146,7 +188,7 @@ export async function claimNextIndexJob(db: Database): Promise<string | null> {
       SELECT id
       FROM jobs
       WHERE status = 'queued'
-        AND kind IN ('index_source', 'reindex_source')
+        AND kind IN ('index_source', 'reindex_source', 'research_run')
         AND scheduled_at <= now()
       ORDER BY scheduled_at ASC
       FOR UPDATE SKIP LOCKED
@@ -189,7 +231,7 @@ export async function reapStaleIndexJobs(
     .where(
       and(
         eq(jobs.status, 'processing'),
-        inArray(jobs.kind, ['index_source', 'reindex_source']),
+        inArray(jobs.kind, ['index_source', 'reindex_source', 'research_run']),
         sql`${jobs.startedAt} IS NOT NULL`,
         sql`${jobs.startedAt} <= ${staleBeforeSql}`,
         sql`${jobs.attempts} < ${maxAttempts}`,
@@ -208,7 +250,7 @@ export async function reapStaleIndexJobs(
     .where(
       and(
         eq(jobs.status, 'processing'),
-        inArray(jobs.kind, ['index_source', 'reindex_source']),
+        inArray(jobs.kind, ['index_source', 'reindex_source', 'research_run']),
         sql`${jobs.startedAt} IS NOT NULL`,
         sql`${jobs.startedAt} <= ${staleBeforeSql}`,
         sql`${jobs.attempts} >= ${maxAttempts}`,
@@ -278,8 +320,9 @@ async function buildSourceIndex(
   db: Database,
   source: Awaited<ReturnType<typeof loadSourceForJob>>,
   tokenStore: InstallationTokenStore,
-) {
+): Promise<BuildIndexResult & { commitSha: string | null }> {
   const config = asConfig(source.config);
+  const sourceConfig = asRecord(source.config);
 
   if (config.localPath) {
     assertLocalPathAllowed(config.localPath);
@@ -288,7 +331,6 @@ async function buildSourceIndex(
   }
 
   if (source.kind === 'github_repo') {
-    const sourceConfig = asRecord(source.config);
     const branch =
       typeof sourceConfig.branch === 'string' ? String(sourceConfig.branch) : undefined;
     const installationId =
@@ -312,6 +354,24 @@ async function buildSourceIndex(
     return { ...index, commitSha: null as string | null };
   }
 
+  if (source.kind === 'web_page') {
+    const index = await buildWebPageIndex(source.identifier, config);
+    return { ...index, commitSha: null as string | null };
+  }
+
+  if (source.kind === 'pdf_document') {
+    const index = await buildPdfDocumentIndex(source.identifier, config);
+    return { ...index, commitSha: null as string | null };
+  }
+
+  if (source.kind === 'academic_paper') {
+    const pdfUrl = typeof sourceConfig.pdfUrl === 'string' ? sourceConfig.pdfUrl : null;
+    const index = pdfUrl
+      ? await buildPdfDocumentIndex(pdfUrl, config)
+      : await buildWebPageIndex(source.identifier, config);
+    return { ...index, commitSha: null as string | null };
+  }
+
   throw new Error(`Unsupported source kind: ${source.kind}`);
 }
 
@@ -330,6 +390,7 @@ function chunkInsertValues(input: {
     path: chunk.path,
     lineStart: chunk.lineStart,
     lineEnd: chunk.lineEnd,
+    page: chunk.page ?? null,
     sectionPath: chunk.sectionPath,
     rawText: chunk.rawText,
     contextualPrefix: chunk.contextualPrefix,
@@ -453,6 +514,86 @@ async function upsertChunks(input: {
   return { upserted, deleted: stale.length };
 }
 
+async function indexSourceNow(input: {
+  db: Database;
+  source: Awaited<ReturnType<typeof loadSourceForJob>>;
+  tokenStore: InstallationTokenStore;
+  onProgress?: (progress: Record<string, unknown>) => Promise<void>;
+}): Promise<Record<string, unknown>> {
+  await input.db
+    .update(sources)
+    .set({ status: 'indexing', statusMessage: 'Indexing source' })
+    .where(eq(sources.id, input.source.id));
+
+  await input.onProgress?.({ done: 0, total: null, current: 'loading_files' });
+  const index = await buildSourceIndex(input.db, input.source, input.tokenStore);
+  await input.onProgress?.({
+    done: 0,
+    total: index.chunks.length,
+    current: 'contextualizing_chunks',
+  });
+  const contextualized = await applyContextualPrefixes({
+    sourceKind: input.source.kind as SourceKind,
+    files: index.files,
+    chunks: index.chunks,
+    config: asConfig(input.source.config),
+  });
+
+  await input.onProgress?.({
+    done: 0,
+    total: contextualized.chunks.length,
+    current: 'embedding_chunks',
+  });
+  const embedded = await embedChunksForIndexing(contextualized.chunks);
+
+  await input.onProgress?.({
+    done: 0,
+    total: embedded.chunks.length,
+    current: 'upserting_chunks',
+  });
+
+  const runId = randomUUID();
+  const result = await upsertChunks({
+    db: input.db,
+    workspaceId: input.source.workspaceId,
+    sourceId: input.source.id,
+    runId,
+    chunks: embedded.chunks,
+    commitSha: index.commitSha,
+  });
+
+  await input.db
+    .update(sources)
+    .set({
+      status: 'indexed',
+      statusMessage: null,
+      lastIndexedAt: new Date(),
+      lastChangeAt: index.lastChangeAt,
+    })
+    .where(eq(sources.id, input.source.id));
+
+  return {
+    files: index.files.length,
+    chunks: index.chunks.length,
+    commit_sha: index.commitSha,
+    chunks_contextualized: contextualized.stats.generated,
+    contextual_prefix_model: contextualized.stats.model,
+    contextual_prefix_mode: contextualized.stats.mode,
+    contextual_prefix_input_tokens: contextualized.stats.inputTokens,
+    contextual_prefix_output_tokens: contextualized.stats.outputTokens,
+    contextual_prefix_cache_creation_input_tokens: contextualized.stats.cacheCreationInputTokens,
+    contextual_prefix_cache_read_input_tokens: contextualized.stats.cacheReadInputTokens,
+    contextual_prefix_skipped_reason: contextualized.stats.skippedReason,
+    chunks_upserted: result.upserted,
+    stale_chunks_deleted: result.deleted,
+    chunks_embedded: embedded.stats.embedded,
+    embedding_model_counts: embedded.stats.modelCounts,
+    embedding_tokens: embedded.stats.totalTokens,
+    embedding_cache_hits: embedded.stats.cacheHits,
+    embedding_skipped_reason: embedded.stats.skippedReason,
+  };
+}
+
 async function markJobCompleted(
   db: Database,
   jobId: string,
@@ -463,7 +604,7 @@ async function markJobCompleted(
     .set({
       status: 'completed',
       completedAt: new Date(),
-      progress: { done: result.chunks, total: result.chunks, current: 'completed' },
+      progress: completionProgress(result),
       result,
       error: null,
     })
@@ -481,6 +622,314 @@ async function markJobFailed(db: Database, jobId: string, error: unknown): Promi
       error: message.slice(0, 4_000),
     })
     .where(eq(jobs.id, jobId));
+}
+
+async function loadResearchRunForJob(db: Database, workspaceId: string, researchRunId: string) {
+  const [run] = await db
+    .select()
+    .from(researchRuns)
+    .where(and(eq(researchRuns.workspaceId, workspaceId), eq(researchRuns.id, researchRunId)))
+    .limit(1);
+  if (!run) throw new Error(`Research run not found for job: ${researchRunId}`);
+  return run;
+}
+
+function canonicalRemoteIdentifier(identifier: string): string {
+  const url = new URL(identifier);
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
+function researchSourceConfig(input: {
+  runQuery: string;
+  candidate: ResearchCandidate;
+}): Record<string, unknown> {
+  return {
+    title: input.candidate.title,
+    sourceUrl: input.candidate.url,
+    pdfUrl: input.candidate.pdfUrl,
+    maxPages: 1,
+    respectRobots: true,
+    pdfExtractor: 'auto',
+    research: {
+      query: input.runQuery,
+      provider: input.candidate.provider,
+      sourceType: input.candidate.sourceType,
+      title: input.candidate.title,
+      snippet: input.candidate.snippet,
+      doi: input.candidate.doi,
+      arxivId: input.candidate.arxivId,
+      year: input.candidate.year,
+      authors: input.candidate.authors,
+      venue: input.candidate.venue,
+      citationCount: input.candidate.citationCount,
+      score: input.candidate.score,
+      metadata: input.candidate.metadata,
+    },
+  };
+}
+
+async function ensureResearchSource(input: {
+  db: Database;
+  workspaceId: string;
+  runQuery: string;
+  candidate: ResearchCandidate;
+}) {
+  const identifier = canonicalRemoteIdentifier(input.candidate.url);
+  const config = researchSourceConfig({
+    runQuery: input.runQuery,
+    candidate: input.candidate,
+  });
+  const [existing] = await input.db
+    .select()
+    .from(sources)
+    .where(and(eq(sources.workspaceId, input.workspaceId), eq(sources.identifier, identifier)))
+    .limit(1);
+
+  if (existing) {
+    const existingConfig = asRecord(existing.config);
+    const [updated] = await input.db
+      .update(sources)
+      .set({
+        config: { ...config, ...existingConfig, research: config.research },
+        status: 'pending',
+        statusMessage: 'Research indexing queued',
+      })
+      .where(and(eq(sources.workspaceId, input.workspaceId), eq(sources.id, existing.id)))
+      .returning();
+    return updated ?? existing;
+  }
+
+  const [created] = await input.db
+    .insert(sources)
+    .values({
+      workspaceId: input.workspaceId,
+      kind: input.candidate.kind,
+      identifier,
+      displayName: input.candidate.title.slice(0, 255),
+      config,
+      indexStrategy: 'manual',
+      status: 'pending',
+      statusMessage: 'Research indexing queued',
+    })
+    .returning();
+  if (!created) throw new Error('Research source insert returned no row');
+  return created;
+}
+
+async function upsertResearchRunSource(input: {
+  db: Database;
+  workspaceId: string;
+  researchRunId: string;
+  sourceId: string;
+  rank: number;
+  status: 'pending' | 'indexed' | 'failed' | 'skipped';
+  candidate: ResearchCandidate;
+  error?: string | null;
+}): Promise<void> {
+  await input.db
+    .insert(researchRunSources)
+    .values({
+      workspaceId: input.workspaceId,
+      researchRunId: input.researchRunId,
+      sourceId: input.sourceId,
+      rank: input.rank,
+      status: input.status,
+      candidate: input.candidate as unknown as Record<string, unknown>,
+      error: input.error ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [researchRunSources.researchRunId, researchRunSources.sourceId],
+      set: {
+        rank: sql`excluded.rank`,
+        status: sql`excluded.status`,
+        candidate: sql`excluded.candidate`,
+        error: sql`excluded.error`,
+      },
+    });
+}
+
+async function markResearchRunFailed(
+  db: Database,
+  researchRunId: string,
+  error: unknown,
+): Promise<void> {
+  const message = sanitizeOperationalError(error, 4_000);
+  await db
+    .update(researchRuns)
+    .set({ status: 'failed', completedAt: new Date(), error: message })
+    .where(eq(researchRuns.id, researchRunId));
+}
+
+export async function processResearchJob(
+  db: Database,
+  jobId: string,
+  tokenStore: InstallationTokenStore = getDefaultTokenStore(),
+): Promise<void> {
+  const job = await getClaimedJob(db, jobId);
+  let researchRunId: string | null = null;
+
+  try {
+    const workspaceId = job.workspaceId;
+    if (!workspaceId) throw new Error('Research job has no workspace_id');
+    if (job.kind !== 'research_run') throw new Error(`Unsupported research job kind: ${job.kind}`);
+
+    const payload = asRecord(job.payload) as JobPayload;
+    if (!payload.research_run_id) throw new Error('Research job payload missing research_run_id');
+    researchRunId = payload.research_run_id;
+
+    const run = await loadResearchRunForJob(db, workspaceId, researchRunId);
+    const config = normalizeResearchRunConfig(run.config);
+
+    await db
+      .update(researchRuns)
+      .set({ status: 'processing', error: null })
+      .where(eq(researchRuns.id, run.id));
+    await updateJobProgress(db, jobId, { done: 0, total: null, current: 'discovering_sources' });
+
+    const discovered = await discoverResearchCandidates({ query: run.query, config });
+    if (discovered.candidates.length === 0) {
+      throw new Error(
+        `research_discovery_empty: no candidates found${
+          discovered.issues.length > 0 ? ` (${discovered.issues.join('; ')})` : ''
+        }`,
+      );
+    }
+
+    const indexedSources: Array<Record<string, unknown>> = [];
+    const failedSources: Array<Record<string, unknown>> = [];
+
+    if (!config.index) {
+      for (const [index, candidate] of discovered.candidates.entries()) {
+        const source = await ensureResearchSource({
+          db,
+          workspaceId,
+          runQuery: run.query,
+          candidate,
+        });
+        await upsertResearchRunSource({
+          db,
+          workspaceId,
+          researchRunId: run.id,
+          sourceId: source.id,
+          rank: index + 1,
+          status: 'skipped',
+          candidate,
+        });
+        indexedSources.push({ source_id: source.id, indexed: false, candidate });
+      }
+    } else {
+      for (const [index, candidate] of discovered.candidates.entries()) {
+        await updateJobProgress(db, jobId, {
+          done: index,
+          total: discovered.candidates.length,
+          current: `indexing:${candidate.title.slice(0, 80)}`,
+        });
+
+        const source = await ensureResearchSource({
+          db,
+          workspaceId,
+          runQuery: run.query,
+          candidate,
+        });
+        await upsertResearchRunSource({
+          db,
+          workspaceId,
+          researchRunId: run.id,
+          sourceId: source.id,
+          rank: index + 1,
+          status: 'pending',
+          candidate,
+        });
+
+        try {
+          const result = await indexSourceNow({
+            db,
+            source,
+            tokenStore,
+            onProgress: (progress) =>
+              updateJobProgress(db, jobId, {
+                ...progress,
+                current: `indexing:${candidate.title.slice(0, 80)}:${String(
+                  progress.current ?? 'running',
+                )}`,
+                sourceRank: index + 1,
+                sourceTotal: discovered.candidates.length,
+              }),
+          });
+          await upsertResearchRunSource({
+            db,
+            workspaceId,
+            researchRunId: run.id,
+            sourceId: source.id,
+            rank: index + 1,
+            status: 'indexed',
+            candidate,
+          });
+          indexedSources.push({
+            source_id: source.id,
+            source_kind: source.kind,
+            identifier: source.identifier,
+            chunks: result.chunks,
+            indexing: result,
+            candidate,
+          });
+        } catch (err) {
+          const message = sanitizeOperationalError(err);
+          await db
+            .update(sources)
+            .set({ status: 'failed', statusMessage: message })
+            .where(eq(sources.id, source.id));
+          await upsertResearchRunSource({
+            db,
+            workspaceId,
+            researchRunId: run.id,
+            sourceId: source.id,
+            rank: index + 1,
+            status: 'failed',
+            candidate,
+            error: message,
+          });
+          failedSources.push({
+            source_id: source.id,
+            source_kind: source.kind,
+            identifier: source.identifier,
+            error: message,
+            candidate,
+          });
+        }
+      }
+
+      if (indexedSources.length === 0) {
+        throw new Error('research_indexing_empty: all discovered sources failed to index');
+      }
+    }
+
+    const result = {
+      query: run.query,
+      depth: config.depth,
+      candidates: discovered.candidates.length,
+      indexed_sources: indexedSources.length,
+      failed_sources: failedSources.length,
+      issues: discovered.issues,
+      sources: indexedSources,
+      failures: failedSources,
+    };
+
+    await db
+      .update(researchRuns)
+      .set({ status: 'completed', completedAt: new Date(), result, error: null })
+      .where(eq(researchRuns.id, run.id));
+    await updateJobProgress(db, jobId, {
+      done: discovered.candidates.length,
+      total: discovered.candidates.length,
+      current: 'completed',
+    });
+    await markJobCompleted(db, jobId, result);
+  } catch (err) {
+    if (researchRunId) await markResearchRunFailed(db, researchRunId, err);
+    await markJobFailed(db, jobId, err);
+  }
 }
 
 export async function processIndexJob(
@@ -502,78 +951,13 @@ export async function processIndexJob(
     if (!payload.source_id) throw new Error('Index job payload missing source_id');
 
     source = await loadSourceForJob(db, workspaceId, payload.source_id);
-    await db
-      .update(sources)
-      .set({ status: 'indexing', statusMessage: 'Indexing source' })
-      .where(eq(sources.id, source.id));
-
-    await updateJobProgress(db, jobId, { done: 0, total: null, current: 'loading_files' });
-    const index = await buildSourceIndex(db, source, tokenStore);
-    await updateJobProgress(db, jobId, {
-      done: 0,
-      total: index.chunks.length,
-      current: 'contextualizing_chunks',
-    });
-    const contextualized = await applyContextualPrefixes({
-      sourceKind: source.kind as 'github_repo' | 'docs_site',
-      files: index.files,
-      chunks: index.chunks,
-      config: asConfig(source.config),
-    });
-
-    await updateJobProgress(db, jobId, {
-      done: 0,
-      total: contextualized.chunks.length,
-      current: 'embedding_chunks',
-    });
-    const embedded = await embedChunksForIndexing(contextualized.chunks);
-
-    await updateJobProgress(db, jobId, {
-      done: 0,
-      total: embedded.chunks.length,
-      current: 'upserting_chunks',
-    });
-
-    const runId = randomUUID();
-    const result = await upsertChunks({
+    const result = await indexSourceNow({
       db,
-      workspaceId,
-      sourceId: source.id,
-      runId,
-      chunks: embedded.chunks,
-      commitSha: index.commitSha,
+      source,
+      tokenStore,
+      onProgress: (progress) => updateJobProgress(db, jobId, progress),
     });
-
-    await db
-      .update(sources)
-      .set({
-        status: 'indexed',
-        statusMessage: null,
-        lastIndexedAt: new Date(),
-        lastChangeAt: index.lastChangeAt,
-      })
-      .where(eq(sources.id, source.id));
-
-    await markJobCompleted(db, jobId, {
-      files: index.files.length,
-      chunks: index.chunks.length,
-      commit_sha: index.commitSha,
-      chunks_contextualized: contextualized.stats.generated,
-      contextual_prefix_model: contextualized.stats.model,
-      contextual_prefix_mode: contextualized.stats.mode,
-      contextual_prefix_input_tokens: contextualized.stats.inputTokens,
-      contextual_prefix_output_tokens: contextualized.stats.outputTokens,
-      contextual_prefix_cache_creation_input_tokens: contextualized.stats.cacheCreationInputTokens,
-      contextual_prefix_cache_read_input_tokens: contextualized.stats.cacheReadInputTokens,
-      contextual_prefix_skipped_reason: contextualized.stats.skippedReason,
-      chunks_upserted: result.upserted,
-      stale_chunks_deleted: result.deleted,
-      chunks_embedded: embedded.stats.embedded,
-      embedding_model_counts: embedded.stats.modelCounts,
-      embedding_tokens: embedded.stats.totalTokens,
-      embedding_cache_hits: embedded.stats.cacheHits,
-      embedding_skipped_reason: embedded.stats.skippedReason,
-    });
+    await markJobCompleted(db, jobId, result);
   } catch (err) {
     if (source) {
       await db
@@ -595,7 +979,12 @@ export async function processOneJob(
   await reapStaleIndexJobs(db);
   const jobId = await claimNextIndexJob(db);
   if (!jobId) return false;
-  await processIndexJob(db, jobId, tokenStore);
+  const job = await getClaimedJob(db, jobId);
+  if ((job.kind as WorkerJobKind) === 'research_run') {
+    await processResearchJob(db, jobId, tokenStore);
+  } else {
+    await processIndexJob(db, jobId, tokenStore);
+  }
   return true;
 }
 

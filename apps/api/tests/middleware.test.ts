@@ -3,11 +3,14 @@ import { afterEach, describe, it } from 'node:test';
 import { Hono } from 'hono';
 // Side-effect import keeps the ContextVariableMap augmentation in scope.
 import '../src/middleware/auth.ts';
-import { bodySizeLimit } from '../src/middleware/body-limit.ts';
+import { ApiError } from '../src/errors.ts';
+import { bodySizeLimit, readLimitedText } from '../src/middleware/body-limit.ts';
 import { rateLimit, resetRateLimitForTests } from '../src/middleware/rate-limit.ts';
 
 const ORIGINAL_MODE = process.env.MNEMIS_MODE;
 const ORIGINAL_RATE = process.env.MNEMIS_RATE_LIMIT_PER_MINUTE;
+const ORIGINAL_RATE_BACKEND = process.env.MNEMIS_RATE_LIMIT_BACKEND;
+const ORIGINAL_TRUST_PROXY = process.env.MNEMIS_TRUST_PROXY;
 const ORIGINAL_BODY = process.env.MNEMIS_MAX_BODY_BYTES;
 
 afterEach(() => {
@@ -17,6 +20,11 @@ afterEach(() => {
   if (ORIGINAL_RATE === undefined)
     Reflect.deleteProperty(process.env, 'MNEMIS_RATE_LIMIT_PER_MINUTE');
   else process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = ORIGINAL_RATE;
+  if (ORIGINAL_RATE_BACKEND === undefined)
+    Reflect.deleteProperty(process.env, 'MNEMIS_RATE_LIMIT_BACKEND');
+  else process.env.MNEMIS_RATE_LIMIT_BACKEND = ORIGINAL_RATE_BACKEND;
+  if (ORIGINAL_TRUST_PROXY === undefined) Reflect.deleteProperty(process.env, 'MNEMIS_TRUST_PROXY');
+  else process.env.MNEMIS_TRUST_PROXY = ORIGINAL_TRUST_PROXY;
   if (ORIGINAL_BODY === undefined) Reflect.deleteProperty(process.env, 'MNEMIS_MAX_BODY_BYTES');
   else process.env.MNEMIS_MAX_BODY_BYTES = ORIGINAL_BODY;
 });
@@ -36,14 +44,29 @@ function makeBodyLimitedApp(): Hono {
   const app = new Hono();
   app.use('*', bodySizeLimit);
   app.post('/echo', async (c) => {
-    const body = await c.req.text();
+    const body = await readLimitedText(c.req.raw);
     return c.json({ length: body.length });
+  });
+  app.onError((err, c) => {
+    if (err instanceof ApiError) {
+      const max =
+        typeof err.details === 'object' && err.details !== null && 'max_body_bytes' in err.details
+          ? (err.details as { max_body_bytes: unknown }).max_body_bytes
+          : undefined;
+      return c.json(
+        { error: err.code, message: err.message, max_body_bytes: max },
+        // biome-ignore lint/suspicious/noExplicitAny: hono StatusCode union
+        err.status as any,
+      );
+    }
+    throw err;
   });
   return app;
 }
 
 describe('rateLimit middleware', () => {
   it('returns 200 with ratelimit-* headers under the limit', async () => {
+    process.env.MNEMIS_RATE_LIMIT_BACKEND = 'memory';
     process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = '5';
     const app = makeRateLimitedApp();
     const res = await app.request('/ping', { headers: { 'x-forwarded-for': '1.2.3.4' } });
@@ -54,6 +77,7 @@ describe('rateLimit middleware', () => {
   });
 
   it('returns 429 with retry-after when the bucket exceeds the limit', async () => {
+    process.env.MNEMIS_RATE_LIMIT_BACKEND = 'memory';
     process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = '2';
     const app = makeRateLimitedApp();
     const headers = { 'x-forwarded-for': '1.2.3.4' };
@@ -72,6 +96,8 @@ describe('rateLimit middleware', () => {
   });
 
   it('keeps independent buckets for different client IPs', async () => {
+    process.env.MNEMIS_RATE_LIMIT_BACKEND = 'memory';
+    process.env.MNEMIS_TRUST_PROXY = 'true';
     process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = '1';
     const app = makeRateLimitedApp();
     const a = await app.request('/ping', { headers: { 'x-forwarded-for': '1.1.1.1' } });
@@ -83,6 +109,7 @@ describe('rateLimit middleware', () => {
   });
 
   it('defaults to 120 req/min in cloud mode and 600 in self-host', async () => {
+    process.env.MNEMIS_RATE_LIMIT_BACKEND = 'memory';
     Reflect.deleteProperty(process.env, 'MNEMIS_RATE_LIMIT_PER_MINUTE');
     const app = makeRateLimitedApp();
 
@@ -94,6 +121,24 @@ describe('rateLimit middleware', () => {
     process.env.MNEMIS_MODE = 'self-host';
     const local = await app.request('/ping', { headers: { 'x-forwarded-for': '9.9.9.9' } });
     assert.equal(local.headers.get('ratelimit-limit'), '600');
+  });
+
+  it('ignores spoofed proxy headers unless trust proxy is enabled', async () => {
+    process.env.MNEMIS_RATE_LIMIT_BACKEND = 'memory';
+    process.env.MNEMIS_RATE_LIMIT_PER_MINUTE = '1';
+    const app = makeRateLimitedApp();
+
+    const first = await app.request('/ping', { headers: { 'x-forwarded-for': '1.1.1.1' } });
+    const second = await app.request('/ping', { headers: { 'x-forwarded-for': '2.2.2.2' } });
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 429);
+
+    resetRateLimitForTests();
+    process.env.MNEMIS_TRUST_PROXY = 'true';
+    const trustedA = await app.request('/ping', { headers: { 'x-forwarded-for': '1.1.1.1' } });
+    const trustedB = await app.request('/ping', { headers: { 'x-forwarded-for': '2.2.2.2' } });
+    assert.equal(trustedA.status, 200);
+    assert.equal(trustedB.status, 200);
   });
 });
 
@@ -125,7 +170,7 @@ describe('bodySizeLimit middleware', () => {
     assert.equal(json.max_body_bytes, 10);
   });
 
-  it('lets requests through when content-length header is missing', async () => {
+  it('returns 413 when the actual body exceeds the override without content-length', async () => {
     process.env.MNEMIS_MAX_BODY_BYTES = '5';
     const app = makeBodyLimitedApp();
     const res = await app.request('/echo', {
@@ -133,8 +178,9 @@ describe('bodySizeLimit middleware', () => {
       headers: { 'content-type': 'text/plain' },
       body: 'this body is far longer than five bytes',
     });
-    // Without an explicit content-length we trust the route handler to enforce
-    // its own bounds; the middleware only short-circuits when the header lies.
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 413);
+    const json = (await res.json()) as { error: string; max_body_bytes: number };
+    assert.equal(json.error, 'payload_too_large');
+    assert.equal(json.max_body_bytes, 5);
   });
 });

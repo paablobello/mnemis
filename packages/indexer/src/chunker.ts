@@ -51,6 +51,7 @@ function buildChunk(file: LoadedFile, span: LineSpan): IndexChunk {
     parentKey: span.parentKey,
     lineStart: span.lineStart,
     lineEnd: span.lineEnd,
+    page: file.page ?? null,
     rawText: span.rawText,
     contextualPrefix: null,
     language: file.language,
@@ -58,6 +59,7 @@ function buildChunk(file: LoadedFile, span: LineSpan): IndexChunk {
     metadata: {
       byte_length: file.byteLength,
       modified_at: file.modifiedAt.toISOString(),
+      ...(file.metadata ?? {}),
       ...span.metadata,
     },
   };

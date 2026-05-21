@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { ApiError } from '../errors.ts';
 import { hasScope, requireScopes, scopeError } from '../middleware/auth.ts';
+import { readJsonBody } from '../middleware/body-limit.ts';
 import {
   type SearchCitation,
   buildCitations,
@@ -19,9 +20,7 @@ export const searchRoutes = new Hono();
 
 searchRoutes.post('/', requireScopes('search:read'), async (c) => {
   const auth = c.get('auth');
-  const body = await c.req.json().catch(() => {
-    throw ApiError.badRequest('invalid_json', 'Body must be valid JSON');
-  });
+  const body = await readJsonBody(c.req.raw);
   const input = sourceSearchSchema.parse(body);
   const include = new Set(input.include ?? []);
   const contentRequired =

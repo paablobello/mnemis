@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-import { buildDocsSiteIndex, crawlDocsSite } from '../src/index.ts';
+import { buildDocsSiteIndex, buildWebPageIndex, crawlDocsSite } from '../src/index.ts';
 
 const originalFetch = globalThis.fetch;
 const originalFirecrawlKey = process.env.FIRECRAWL_API_KEY;
@@ -209,8 +209,89 @@ describe('docs crawler', () => {
       ['guide.md'],
     );
     assert.equal(files[0]!.content, '# Guide\n\nRendered by Firecrawl.');
+    assert.equal(files[0]!.metadata?.crawler_provider, 'firecrawl');
     assert.equal(calls[0]!.url, 'https://firecrawl.test/v2/crawl');
     assert.equal((calls[0]!.body as { limit: number }).limit, 5);
+  });
+
+  it('uses Firecrawl scrape for web_page sources in auto mode when configured', async () => {
+    process.env.FIRECRAWL_API_KEY = 'fc-test';
+    process.env.FIRECRAWL_API_URL = 'https://firecrawl.test/v2';
+    const calls: Array<{ url: string; body: unknown }> = [];
+
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      calls.push({
+        url: href,
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+
+      if (href === 'https://firecrawl.test/v2/scrape') {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              markdown: '# React Action State\n\nRendered by Firecrawl scrape.',
+              metadata: {
+                sourceURL: 'https://react.example.com/reference/react/useActionState',
+                title: 'React Action State',
+                statusCode: 200,
+                contentType: 'text/html',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('unexpected native fallback', { status: 500 });
+    };
+
+    const index = await buildWebPageIndex(
+      'https://react.example.com/reference/react/useActionState',
+      {
+        docsCrawler: 'auto',
+      },
+    );
+
+    assert.equal(index.files.length, 1);
+    assert.equal(index.files[0]!.path, 'reference/react/useActionState.md');
+    assert.equal(index.files[0]!.metadata?.crawler_provider, 'firecrawl');
+    assert.equal(index.files[0]!.metadata?.firecrawl_status, 200);
+    assert.equal(calls[0]!.url, 'https://firecrawl.test/v2/scrape');
+    assert.equal(
+      (calls[0]!.body as { url: string }).url,
+      'https://react.example.com/reference/react/useActionState',
+    );
+  });
+
+  it('falls back to native web_page extraction when Firecrawl scrape fails in auto mode', async () => {
+    process.env.FIRECRAWL_API_KEY = 'fc-test';
+    process.env.FIRECRAWL_API_URL = 'https://firecrawl.test/v2';
+
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      if (href === 'https://firecrawl.test/v2/scrape') {
+        return new Response(JSON.stringify({ success: false, error: 'rate limited' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (href.endsWith('/robots.txt') || href.endsWith('/sitemap.xml')) {
+        return new Response('', { status: 404 });
+      }
+      if (href === 'https://docs.example.com/article') {
+        return response(html('Article', '<h1>Article</h1><p>Native web fallback.</p>'));
+      }
+      return new Response('missing', { status: 404 });
+    };
+
+    const index = await buildWebPageIndex('https://docs.example.com/article', {
+      docsCrawler: 'auto',
+    });
+
+    assert.equal(index.files.length, 1);
+    assert.equal(index.files[0]!.metadata?.crawler_provider, 'native');
+    assert.match(index.files[0]!.content, /Native web fallback/);
   });
 
   it('falls back to the native crawler in auto mode when Firecrawl is not configured', async () => {

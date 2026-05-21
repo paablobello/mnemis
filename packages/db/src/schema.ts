@@ -137,7 +137,7 @@ export const apiKeys = pgTable(
 );
 
 /* ----------------------------------------------------------------------------
- *  sources — indexed knowledge sources (repos, docs sites)
+ *  sources — indexed knowledge sources (repos, docs, web pages, PDFs, papers)
  * --------------------------------------------------------------------------*/
 export const sources = pgTable(
   'sources',
@@ -146,8 +146,8 @@ export const sources = pgTable(
     workspaceId: uuid('workspace_id')
       .references(() => workspaces.id, { onDelete: 'cascade' })
       .notNull(),
-    kind: text('kind').notNull(), // github_repo | docs_site
-    identifier: text('identifier').notNull(), // owner/repo or full URL
+    kind: text('kind').notNull(), // github_repo | docs_site | web_page | pdf_document | academic_paper
+    identifier: text('identifier').notNull(), // owner/repo, full URL, DOI/arXiv URL, or collection id
     displayName: text('display_name').notNull(),
     config: jsonb('config').notNull().default({}), // branch, includes, excludes, focus_instructions
     lastIndexedAt: timestamp('last_indexed_at', { withTimezone: true }),
@@ -165,6 +165,62 @@ export const sources = pgTable(
       t.workspaceId,
       t.identifier,
     ),
+  }),
+);
+
+/* ----------------------------------------------------------------------------
+ *  research_runs — autonomous discovery + indexing workflows
+ * --------------------------------------------------------------------------*/
+export const researchRuns = pgTable(
+  'research_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    query: text('query').notNull(),
+    depth: text('depth').notNull().default('standard'), // quick | standard | deep
+    status: text('status').notNull().default('queued'), // queued | processing | completed | failed
+    config: jsonb('config').notNull().default({}),
+    result: jsonb('result'),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    workspaceIdx: index('research_runs_workspace_idx').on(t.workspaceId),
+    workspaceStatusIdx: index('research_runs_workspace_status_idx').on(t.workspaceId, t.status),
+    workspaceCreatedIdx: index('research_runs_workspace_created_idx').on(
+      t.workspaceId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export const researchRunSources = pgTable(
+  'research_run_sources',
+  {
+    researchRunId: uuid('research_run_id')
+      .references(() => researchRuns.id, { onDelete: 'cascade' })
+      .notNull(),
+    sourceId: uuid('source_id')
+      .references(() => sources.id, { onDelete: 'cascade' })
+      .notNull(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    rank: integer('rank').notNull(),
+    status: text('status').notNull().default('pending'), // pending | indexed | failed | skipped
+    candidate: jsonb('candidate').notNull().default({}),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.researchRunId, t.sourceId] }),
+    workspaceIdx: index('research_run_sources_workspace_idx').on(t.workspaceId),
+    sourceIdx: index('research_run_sources_source_idx').on(t.sourceId),
   }),
 );
 
@@ -357,6 +413,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   githubAppInstallations: many(githubAppInstallations),
   apiKeys: many(apiKeys),
   sources: many(sources),
+  researchRuns: many(researchRuns),
   memories: many(memories),
 }));
 
@@ -370,6 +427,24 @@ export const githubAppInstallationsRelations = relations(githubAppInstallations,
 export const sourcesRelations = relations(sources, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [sources.workspaceId], references: [workspaces.id] }),
   chunks: many(chunks),
+  researchRunSources: many(researchRunSources),
+}));
+
+export const researchRunsRelations = relations(researchRuns, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [researchRuns.workspaceId], references: [workspaces.id] }),
+  sources: many(researchRunSources),
+}));
+
+export const researchRunSourcesRelations = relations(researchRunSources, ({ one }) => ({
+  researchRun: one(researchRuns, {
+    fields: [researchRunSources.researchRunId],
+    references: [researchRuns.id],
+  }),
+  source: one(sources, { fields: [researchRunSources.sourceId], references: [sources.id] }),
+  workspace: one(workspaces, {
+    fields: [researchRunSources.workspaceId],
+    references: [workspaces.id],
+  }),
 }));
 
 export const chunksRelations = relations(chunks, ({ one, many }) => ({
@@ -398,12 +473,21 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type GitHubAppInstallation = typeof githubAppInstallations.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type Source = typeof sources.$inferSelect;
+export type ResearchRun = typeof researchRuns.$inferSelect;
+export type ResearchRunSource = typeof researchRunSources.$inferSelect;
 export type Chunk = typeof chunks.$inferSelect;
 export type Memory = typeof memories.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 
 export type MemoryKind = 'working' | 'session' | 'fact' | 'procedural';
-export type SourceKind = 'github_repo' | 'docs_site';
+export type SourceKind =
+  | 'github_repo'
+  | 'docs_site'
+  | 'web_page'
+  | 'pdf_document'
+  | 'academic_paper'
+  | 'research_collection';
 export type SourceStatus = 'pending' | 'indexing' | 'indexed' | 'failed';
+export type ResearchRunStatus = 'queued' | 'processing' | 'completed' | 'failed';
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';

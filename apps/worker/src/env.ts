@@ -36,6 +36,19 @@ const envSchema = z.object({
   GITHUB_APP_PRIVATE_KEY: z
     .preprocess(emptyToUndefined, z.string().optional())
     .transform((value) => (value ? value.replace(/\\n/g, '\n') : value)),
+  TAVILY_API_KEY: optionalString,
+  MNEMIS_TAVILY_API_KEY: optionalString,
+  EXA_API_KEY: optionalString,
+  MNEMIS_EXA_API_KEY: optionalString,
+  BRAVE_SEARCH_API_KEY: optionalString,
+  MNEMIS_BRAVE_SEARCH_API_KEY: optionalString,
+  SEMANTIC_SCHOLAR_API_KEY: optionalString,
+  OPENALEX_EMAIL: optionalString,
+  MNEMIS_CONTEXTUAL_PREFIX_CONCURRENCY: optionalPositiveInt,
+  MNEMIS_RESEARCH_TIMEOUT_MS: optionalPositiveInt,
+  MNEMIS_PDF_EXTRACTOR_URL: optionalString,
+  MNEMIS_PDF_EXTRACTOR_TIMEOUT_MS: optionalPositiveInt,
+  MNEMIS_PDF_NATIVE_MIN_CHARS: optionalPositiveInt,
 });
 
 export type WorkerEnv = z.infer<typeof envSchema>;

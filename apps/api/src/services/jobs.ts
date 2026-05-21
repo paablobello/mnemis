@@ -3,7 +3,12 @@ import { type SQL, and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import { ApiError } from '../errors.ts';
 
-export type JobKind = 'index_source' | 'reindex_source' | 'embed_chunks' | 'rerank_warmup';
+export type JobKind =
+  | 'index_source'
+  | 'reindex_source'
+  | 'research_run'
+  | 'embed_chunks'
+  | 'rerank_warmup';
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
 export interface JobDto {
@@ -32,10 +37,14 @@ function redactConfig(config: unknown): Record<string, unknown> | undefined {
   const safe: Record<string, unknown> = {};
   for (const key of [
     'branch',
+    'title',
+    'sourceUrl',
+    'pdfUrl',
     'includePaths',
     'excludePaths',
     'focusInstructions',
     'maxFileBytes',
+    'maxPdfBytes',
     'chunkMaxChars',
     'chunkOverlapLines',
     'contextualPrefixMode',
@@ -44,6 +53,8 @@ function redactConfig(config: unknown): Record<string, unknown> | undefined {
     'maxPages',
     'respectRobots',
     'docsCrawler',
+    'pdfExtractor',
+    'research',
   ]) {
     if (raw[key] !== undefined) safe[key] = raw[key];
   }
@@ -57,6 +68,8 @@ function redactPayload(payload: unknown): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
   for (const key of [
     'source_id',
+    'research_run_id',
+    'query',
     'source_kind',
     'identifier',
     'github_delivery',

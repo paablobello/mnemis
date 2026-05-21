@@ -14,8 +14,9 @@
     "@hono/node-server": "^1.13.7",
     "@mnemis/db": "workspace:*",
     "@mnemis/embeddings": "workspace:*",
-    "drizzle-orm": "^0.36.0",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.6.10",
+    "jose": "^5.9.6",
     "postgres": "^3.4.5",
     "zod": "^3.23.8"
   },

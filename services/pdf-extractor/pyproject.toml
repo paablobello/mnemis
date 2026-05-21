@@ -1,0 +1,19 @@
+[project]
+name = "mnemis-pdf-extractor"
+version = "0.1.0"
+description = "High-quality PDF extraction sidecar for Mnemis using Docling and GROBID."
+requires-python = ">=3.12"
+dependencies = [
+  "docling>=2.53.0",
+  "fastapi>=0.115.0",
+  "httpx>=0.27.0",
+  "pydantic>=2.8.0",
+  "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

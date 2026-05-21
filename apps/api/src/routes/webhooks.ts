@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { ApiError } from '../errors.ts';
+import { readLimitedText } from '../middleware/body-limit.ts';
 import {
   type GitHubPushPayload,
   handleGitHubPush,
@@ -10,7 +11,7 @@ import {
 export const webhooksRoutes = new Hono();
 
 webhooksRoutes.post('/github', async (c) => {
-  const rawBody = await c.req.text();
+  const rawBody = await readLimitedText(c.req.raw);
   verifyGitHubSignature({
     secret: process.env.GITHUB_WEBHOOK_SECRET,
     rawBody,

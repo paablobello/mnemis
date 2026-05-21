@@ -7,8 +7,8 @@
  *
  * `searchKeyword` returns lexical-only results (no embedding required).
  * `searchHybrid` returns RRF-fused results and degrades gracefully to lexical
- * alone when embeddings are disabled (no VOYAGE_API_KEY) or when the corpus
- * has no rows with embeddings yet.
+ * alone when embeddings are disabled, the embedding provider fails, or when
+ * the corpus has no rows with embeddings yet.
  */
 import { type Memory, memories } from '@mnemis/db';
 import {
@@ -25,7 +25,7 @@ import {
 } from 'drizzle-orm';
 import { getDb } from '../db.ts';
 import type { MemoryKindInput } from '../validators/memories.ts';
-import { getEmbeddings } from './embeddings.ts';
+import { tryEmbedText } from './embeddings.ts';
 import { maybeRerank } from './rerank.ts';
 
 const RRF_K = 60;
@@ -206,13 +206,11 @@ export async function searchHybrid(
   filters: SearchFilters,
   limit: number,
 ): Promise<HybridResult> {
-  const embedClient = getEmbeddings();
-
   let qvec: number[] | null = null;
   let model: string | null = null;
   let tokens = 0;
-  if (embedClient) {
-    const embed = await embedClient.embed(query, { inputType: 'query' });
+  const embed = await tryEmbedText(query, { inputType: 'query', context: 'memory search' });
+  if (embed.vector) {
     qvec = embed.vector;
     model = embed.model;
     tokens = embed.tokens;

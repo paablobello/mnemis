@@ -9,6 +9,7 @@ const DEFAULT_MAX_CHUNK_CHARS = 8_000;
 const MAX_PREFIX_CHARS = 1_000;
 const DOC_LANGUAGES = new Set(['markdown', 'mdx', 'text', 'html']);
 const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
+const DEFAULT_CONTEXTUAL_PREFIX_CONCURRENCY = 4;
 
 type ContextualPrefixMode = NonNullable<IndexSourceConfig['contextualPrefixMode']>;
 
@@ -125,9 +126,20 @@ function sanitizePrefix(text: string): string {
     .slice(0, MAX_PREFIX_CHARS);
 }
 
+function providerFailureReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/\s+/g, ' ').trim().slice(0, 240) || 'unknown provider error';
+}
+
 function providerTimeoutMs(): number {
   const configured = Number.parseInt(process.env.MNEMIS_PROVIDER_TIMEOUT_MS ?? '', 10);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+function contextualPrefixConcurrency(): number {
+  const configured = Number.parseInt(process.env.MNEMIS_CONTEXTUAL_PREFIX_CONCURRENCY ?? '', 10);
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_CONTEXTUAL_PREFIX_CONCURRENCY;
+  return Math.min(configured, 16);
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
@@ -221,6 +233,23 @@ function addUsage(stats: ContextualPrefixStats, usage: ContextualPrefixUsage): v
   stats.cacheReadInputTokens += usage.cacheReadInputTokens;
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export async function applyContextualPrefixes(
   input: ContextualPrefixInput,
 ): Promise<{ chunks: IndexChunk[]; stats: ContextualPrefixStats }> {
@@ -288,30 +317,58 @@ export async function applyContextualPrefixes(
     byPath.set(chunk.path, group);
   }
 
+  const tasks: Array<{
+    chunk: IndexChunk;
+    documentText: string;
+    documentHash: string;
+  }> = [];
+
   for (const [path, pathChunks] of byPath) {
     const file = fileByPath.get(path);
     if (!file) {
-      stats.skipped += pathChunks.length;
       continue;
     }
 
     const documentText = trimText(file.content, maxDocumentChars);
     const documentHash = hashText(documentText);
     for (const chunk of pathChunks) {
-      const { prefix, usage } = await client.generatePrefix({
-        documentText,
-        chunk,
-        maxChunkChars,
-      });
-      chunk.contextualPrefix = prefix;
-      chunk.metadata = {
-        ...chunk.metadata,
-        contextual_prefix_model: model,
-        contextual_prefix_document_hash: documentHash,
-        contextual_prefix_chunk_hash: hashText(trimText(chunk.rawText, maxChunkChars)),
-      };
+      tasks.push({ chunk, documentText, documentHash });
+    }
+  }
+
+  const results = await mapWithConcurrency(
+    tasks,
+    contextualPrefixConcurrency(),
+    async ({ chunk, documentText, documentHash }) => {
+      try {
+        const result = await client.generatePrefix({
+          documentText,
+          chunk,
+          maxChunkChars,
+        });
+
+        chunk.contextualPrefix = result.prefix;
+        chunk.metadata = {
+          ...chunk.metadata,
+          contextual_prefix_model: model,
+          contextual_prefix_document_hash: documentHash,
+          contextual_prefix_chunk_hash: hashText(trimText(chunk.rawText, maxChunkChars)),
+        };
+        return { usage: result.usage };
+      } catch (err) {
+        return { error: providerFailureReason(err) };
+      }
+    },
+  );
+
+  for (const result of results) {
+    if ('error' in result) {
+      if (result.error) stats.skippedReason ??= result.error;
+      continue;
+    }
+    if ('usage' in result) {
       stats.generated++;
-      addUsage(stats, usage);
+      addUsage(stats, result.usage);
     }
   }
 
