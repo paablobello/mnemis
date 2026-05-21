@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireScopes } from '../middleware/auth.ts';
 import { readJsonBody } from '../middleware/body-limit.ts';
-import { assertCreditsAvailable } from '../services/quotas.ts';
+import { assertCreditsAvailable, assertResearchQuota } from '../services/quotas.ts';
 import {
   createResearchRun,
   getResearchRun,
@@ -21,6 +21,7 @@ researchRoutes.post('/runs', requireScopes('research:write', 'sources:write'), a
   const body = await readJsonBody(c.req.raw);
   const input = createResearchRunSchema.parse(body);
   const estimatedCredits = input.depth === 'deep' ? 150 : input.depth === 'standard' ? 60 : 20;
+  await assertResearchQuota(auth.workspaceId);
   await assertCreditsAvailable(auth.workspaceId, estimatedCredits);
   const result = await createResearchRun(auth.workspaceId, input);
   await recordUsage(c, 'research', estimatedCredits, {

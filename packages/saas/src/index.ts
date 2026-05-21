@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   type ApiKey,
+  type Plan,
   type Source,
   type Subscription,
   type User,
@@ -14,10 +15,12 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   jobs,
   lt,
   memories,
   or,
+  plans,
   researchRuns,
   sources,
   sql,
@@ -51,18 +54,29 @@ export interface UsageSummary {
   credits_used: number;
   credits_limit: number;
   credits_remaining: number;
+  credits_unlimited: boolean;
   requests: number;
+}
+
+export interface QuotaSummary {
+  used: number;
+  max: number | null;
 }
 
 export interface DashboardSnapshot {
   user: User;
   workspace: Workspace;
   role: string;
+  plan: Plan;
   subscription: Pick<
     Subscription,
     'status' | 'stripePriceId' | 'currentPeriodStart' | 'currentPeriodEnd' | 'cancelAtPeriodEnd'
   > | null;
   usage: UsageSummary;
+  quotas: {
+    sources: QuotaSummary;
+    research_runs: QuotaSummary;
+  };
   counts: {
     sources: number;
     indexed_sources: number;
@@ -84,9 +98,103 @@ export interface DashboardSnapshot {
 
 export const DEFAULT_MONTHLY_CREDITS = 10_000;
 
+/**
+ * Sentinel stored in `plans.monthly_credits` for "unlimited" tiers, since the
+ * column is NOT NULL. Helpers treat values >= this as no cap.
+ */
+export const UNLIMITED_CREDITS_SENTINEL = 999_999_999;
+
+/** Stripe subscription statuses that grant plan access. */
+const ACTIVE_SUBSCRIPTION_STATUSES = ['active', 'trialing'] as const;
+
 export function monthlyCreditLimit(): number {
   const configured = Number.parseInt(process.env.MNEMIS_FREE_MONTHLY_CREDITS ?? '', 10);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MONTHLY_CREDITS;
+}
+
+function freePlanFallback(): Plan {
+  const now = new Date();
+  return {
+    id: 'free',
+    name: 'Free',
+    description: null,
+    stripePriceId: null,
+    monthlyCredits: monthlyCreditLimit(),
+    includedSeats: 1,
+    maxSources: null,
+    maxResearchRunsPerMonth: null,
+    features: {},
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  } satisfies Plan;
+}
+
+/**
+ * Resolves the active plan for a workspace. Returns the plan tied to an active
+ * (or trialing) subscription, otherwise the `free` row. If even `free` is
+ * missing (DB unseeded), synthesises a fallback using env-based defaults so
+ * production behaviour matches today's single-tier flat limit.
+ */
+export async function getPlanForWorkspace(db: Database, workspaceId: string): Promise<Plan> {
+  const [activeRow] = await db
+    .select({ plan: plans })
+    .from(subscriptions)
+    .innerJoin(plans, eq(plans.id, subscriptions.planId))
+    .where(
+      and(
+        eq(subscriptions.workspaceId, workspaceId),
+        inArray(subscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES as unknown as string[]),
+      ),
+    )
+    .limit(1);
+  if (activeRow?.plan) return activeRow.plan;
+
+  const [freeRow] = await db.select().from(plans).where(eq(plans.id, 'free')).limit(1);
+  return freeRow ?? freePlanFallback();
+}
+
+/**
+ * Effective monthly credit limit for a workspace. Treats the UNLIMITED sentinel
+ * (and any value >= it) as no cap and returns Number.MAX_SAFE_INTEGER so the
+ * call site can do a simple numeric comparison.
+ */
+export async function getWorkspaceCreditLimit(db: Database, workspaceId: string): Promise<number> {
+  const plan = await getPlanForWorkspace(db, workspaceId);
+  if (plan.monthlyCredits >= UNLIMITED_CREDITS_SENTINEL) return Number.MAX_SAFE_INTEGER;
+  return plan.monthlyCredits;
+}
+
+export async function getWorkspaceSourceQuota(
+  db: Database,
+  workspaceId: string,
+): Promise<QuotaSummary> {
+  const plan = await getPlanForWorkspace(db, workspaceId);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(sources)
+    .where(eq(sources.workspaceId, workspaceId));
+  return { used: row?.count ?? 0, max: plan.maxSources };
+}
+
+export async function getWorkspaceResearchQuota(
+  db: Database,
+  workspaceId: string,
+  now = new Date(),
+): Promise<QuotaSummary> {
+  const plan = await getPlanForWorkspace(db, workspaceId);
+  const { start, end } = billingPeriod(now);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(researchRuns)
+    .where(
+      and(
+        eq(researchRuns.workspaceId, workspaceId),
+        gte(researchRuns.createdAt, start),
+        lt(researchRuns.createdAt, end),
+      ),
+    );
+  return { used: row?.count ?? 0, max: plan.maxResearchRunsPerMonth };
 }
 
 export const DEFAULT_KEY_SCOPES = [
@@ -271,28 +379,34 @@ export async function getUsageSummary(
   now = new Date(),
 ): Promise<UsageSummary> {
   const { start, end } = billingPeriod(now);
-  const [row] = await db
-    .select({
-      credits: sql<number>`coalesce(sum(${usageEvents.costCredits}), 0)::int`,
-      requests: sql<number>`count(*)::int`,
-    })
-    .from(usageEvents)
-    .where(
-      and(
-        eq(usageEvents.workspaceId, workspaceId),
-        gte(usageEvents.occurredAt, start),
-        lt(usageEvents.occurredAt, end),
+  const [rows, plan] = await Promise.all([
+    db
+      .select({
+        credits: sql<number>`coalesce(sum(${usageEvents.costCredits}), 0)::int`,
+        requests: sql<number>`count(*)::int`,
+      })
+      .from(usageEvents)
+      .where(
+        and(
+          eq(usageEvents.workspaceId, workspaceId),
+          gte(usageEvents.occurredAt, start),
+          lt(usageEvents.occurredAt, end),
+        ),
       ),
-    );
+    getPlanForWorkspace(db, workspaceId),
+  ]);
+  const row = rows[0];
 
   const used = row?.credits ?? 0;
-  const limit = monthlyCreditLimit();
+  const unlimited = plan.monthlyCredits >= UNLIMITED_CREDITS_SENTINEL;
+  const limit = plan.monthlyCredits;
   return {
     period_start: start.toISOString(),
     period_end: end.toISOString(),
     credits_used: used,
     credits_limit: limit,
-    credits_remaining: Math.max(0, limit - used),
+    credits_remaining: unlimited ? Number.MAX_SAFE_INTEGER : Math.max(0, limit - used),
+    credits_unlimited: unlimited,
     requests: row?.requests ?? 0,
   };
 }
@@ -315,6 +429,8 @@ export async function getDashboardSnapshot(
     recentSources,
     subscription,
     usage,
+    plan,
+    researchQuota,
   ] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)::int` })
@@ -362,10 +478,13 @@ export async function getDashboardSnapshot(
       .limit(8),
     subscriptionForWorkspace(db, workspaceId),
     getUsageSummary(db, workspaceId),
+    getPlanForWorkspace(db, workspaceId),
+    getWorkspaceResearchQuota(db, workspaceId),
   ]);
 
   return {
     ...context,
+    plan,
     subscription: subscription
       ? {
           status: subscription.status,
@@ -376,6 +495,10 @@ export async function getDashboardSnapshot(
         }
       : null,
     usage,
+    quotas: {
+      sources: { used: sourceCount[0]?.count ?? 0, max: plan.maxSources },
+      research_runs: researchQuota,
+    },
     counts: {
       sources: sourceCount[0]?.count ?? 0,
       indexed_sources: indexedSourceCount[0]?.count ?? 0,
@@ -440,12 +563,20 @@ export async function createDashboardSource(input: {
   displayName?: string | null;
 }): Promise<Source> {
   const identifier = normalizeUrl(input.identifier);
-  const existing = await input.db
-    .select({ id: sources.id })
-    .from(sources)
-    .where(and(eq(sources.workspaceId, input.workspaceId), eq(sources.identifier, identifier)))
-    .limit(1);
+  const [existing, quota] = await Promise.all([
+    input.db
+      .select({ id: sources.id })
+      .from(sources)
+      .where(and(eq(sources.workspaceId, input.workspaceId), eq(sources.identifier, identifier)))
+      .limit(1),
+    getWorkspaceSourceQuota(input.db, input.workspaceId),
+  ]);
   if (existing[0]) throw new Error('source already exists');
+  if (quota.max !== null && quota.used >= quota.max) {
+    throw new Error(
+      `Source quota reached (${quota.used}/${quota.max}). Upgrade your plan to add more.`,
+    );
+  }
 
   const url = new URL(identifier);
   const [source] = await input.db
@@ -493,6 +624,12 @@ export async function createDashboardResearchRun(input: {
 }): Promise<string> {
   const query = input.query.trim();
   if (!query) throw new Error('query is required');
+  const quota = await getWorkspaceResearchQuota(input.db, input.workspaceId);
+  if (quota.max !== null && quota.used >= quota.max) {
+    throw new Error(
+      `Research run quota reached (${quota.used}/${quota.max} this month). Upgrade your plan to run more.`,
+    );
+  }
   const config = {
     depth: input.depth ?? 'standard',
     maxSources: input.depth === 'deep' ? 20 : 8,

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireScopes } from '../middleware/auth.ts';
 import { readJsonBody } from '../middleware/body-limit.ts';
 import { jobToDto } from '../services/jobs.ts';
-import { assertCreditsAvailable } from '../services/quotas.ts';
+import { assertCreditsAvailable, assertSourceQuota } from '../services/quotas.ts';
 import {
   createSource,
   enqueueReindex,
@@ -27,6 +27,7 @@ sourcesRoutes.post('/', requireScopes('sources:write'), async (c) => {
   const auth = c.get('auth');
   const body = await readJsonBody(c.req.raw);
   const input = createSourceSchema.parse(body);
+  await assertSourceQuota(auth.workspaceId);
   if (input.enqueue) await assertCreditsAvailable(auth.workspaceId, 1);
   const { source, job } = await createSource(auth.workspaceId, input, { scopes: auth.scopes });
   if (job) await recordUsage(c, 'index', 1, { source_id: source.id, source_kind: source.kind });
