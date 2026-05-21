@@ -3,6 +3,7 @@ export * from './client.ts';
 export * from './api-keys.ts';
 export {
   and,
+  asc,
   desc,
   eq,
   gt,

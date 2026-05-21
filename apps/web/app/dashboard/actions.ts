@@ -10,6 +10,8 @@ import {
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { ensureStripeCustomer } from '../../lib/billing';
+import { missingStripeBillingEnv } from '../../lib/config';
 import { getDashboardDb } from '../../lib/db';
 import { requireDashboardContext } from '../../lib/session';
 import { appUrl, getStripe } from '../../lib/stripe';
@@ -108,34 +110,13 @@ export async function createResearchAction(formData: FormData) {
   redirect('/dashboard');
 }
 
-async function ensureStripeCustomer(input: {
-  workspaceId: string;
-  workspaceName: string;
-  email: string;
-}): Promise<string> {
-  const db = getDashboardDb();
-  const [existing] = await db
-    .select()
-    .from(billingCustomers)
-    .where(eq(billingCustomers.workspaceId, input.workspaceId))
-    .limit(1);
-  if (existing) return existing.stripeCustomerId;
-
-  const customer = await getStripe().customers.create({
-    email: input.email,
-    name: input.workspaceName,
-    metadata: { workspace_id: input.workspaceId },
-  });
-  await db.insert(billingCustomers).values({
-    workspaceId: input.workspaceId,
-    stripeCustomerId: customer.id,
-    billingEmail: input.email,
-  });
-  return customer.id;
-}
-
 export async function startCheckoutAction(formData: FormData) {
   const context = await requireDashboardContext();
+  if (missingStripeBillingEnv().length > 0) {
+    await setFlash('Stripe billing is not configured.');
+    redirect('/dashboard');
+  }
+
   const priceId = stringValue(formData, 'priceId') || process.env.STRIPE_PRICE_ID_PRO;
   if (!priceId) {
     await setFlash('STRIPE_PRICE_ID_PRO is not configured.');
@@ -163,6 +144,11 @@ export async function startCheckoutAction(formData: FormData) {
 
 export async function openBillingPortalAction() {
   const context = await requireDashboardContext();
+  if (missingStripeBillingEnv().length > 0) {
+    await setFlash('Stripe billing is not configured.');
+    redirect('/dashboard');
+  }
+
   const [customer] = await getDashboardDb()
     .select()
     .from(billingCustomers)

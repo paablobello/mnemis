@@ -1,4 +1,3 @@
-import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import { getDashboardSnapshot } from '@mnemis/saas';
 import {
   Activity,
@@ -17,15 +16,17 @@ import {
   Terminal,
 } from 'lucide-react';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { isClerkConfigured } from '../../lib/config';
 import { getDashboardDb } from '../../lib/db';
 import { requireDashboardContext } from '../../lib/session';
+import { DashboardAuthControls } from '../clerk-controls';
 import {
   createApiKeyAction,
   createResearchAction,
   createSourceAction,
   openBillingPortalAction,
   revokeApiKeyAction,
-  startCheckoutAction,
 } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -51,7 +52,42 @@ function statusClass(status: string): string {
   return 'pill neutral';
 }
 
+function QuotaRow({
+  label,
+  used,
+  max,
+  suffix,
+}: {
+  label: string;
+  used: number;
+  max: number | null;
+  suffix?: string;
+}) {
+  const unlimited = max === null;
+  const percent = unlimited ? 0 : pct(used, max);
+  const usedLabel = used.toLocaleString('en-US');
+  const maxLabel = unlimited ? 'Unlimited' : max.toLocaleString('en-US');
+  return (
+    <div className="quota-row">
+      <header>
+        <strong>{label}</strong>
+        <span>
+          {unlimited ? `${usedLabel} used · Unlimited` : `${usedLabel} of ${maxLabel}`}
+          {suffix ? ` · ${suffix}` : ''}
+        </span>
+      </header>
+      {unlimited ? null : (
+        <div className="usage-bar" aria-label={`${label} usage`}>
+          <span style={{ width: `${percent}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default async function DashboardPage() {
+  if (!isClerkConfigured()) redirect('/?setup=missing-clerk');
+
   const context = await requireDashboardContext();
   const snapshot = await getDashboardSnapshot(getDashboardDb(), context);
   const cookieStore = await cookies();
@@ -59,9 +95,6 @@ export default async function DashboardPage() {
   const flash = cookieStore.get('mnemis_dashboard_flash')?.value ?? null;
   const apiUrl =
     process.env.NEXT_PUBLIC_MNEMIS_API_URL ?? process.env.MNEMIS_API_URL ?? 'http://localhost:8787';
-  const usagePercent = pct(snapshot.usage.credits_used, snapshot.usage.credits_limit);
-  const proPrice = process.env.STRIPE_PRICE_ID_PRO;
-
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -100,8 +133,7 @@ export default async function DashboardPage() {
             <h1>{snapshot.workspace.name}</h1>
           </div>
           <div className="topbar-actions">
-            <OrganizationSwitcher hidePersonal />
-            <UserButton />
+            <DashboardAuthControls />
           </div>
         </header>
 
@@ -270,27 +302,37 @@ npx @mnemis/mcp`}</pre>
               </div>
               <CreditCard size={19} />
             </div>
-            <div className="usage-bar" aria-label="Credit usage">
-              <span style={{ width: `${usagePercent}%` }} />
-            </div>
-            <p className="usage-copy">
-              {snapshot.usage.credits_used} of {snapshot.usage.credits_limit} credits used. Period
-              resets {date(snapshot.usage.period_end)}.
-            </p>
             <div className="billing-state">
               <BookOpen size={17} />
               <span>
-                Subscription: <strong>{snapshot.subscription?.status ?? 'not configured'}</strong>
+                Plan: <strong>{snapshot.plan.name}</strong> ·{' '}
+                {snapshot.subscription?.status ?? 'free'}
               </span>
             </div>
+            <div className="quota-stack">
+              <QuotaRow
+                label="Credits"
+                used={snapshot.usage.credits_used}
+                max={snapshot.usage.credits_unlimited ? null : snapshot.usage.credits_limit}
+                suffix={`Period resets ${date(snapshot.usage.period_end)}`}
+              />
+              <QuotaRow
+                label="Sources"
+                used={snapshot.quotas.sources.used}
+                max={snapshot.quotas.sources.max}
+              />
+              <QuotaRow
+                label="Research runs"
+                used={snapshot.quotas.research_runs.used}
+                max={snapshot.quotas.research_runs.max}
+                suffix="this month"
+              />
+            </div>
             <div className="billing-actions">
-              <form action={startCheckoutAction}>
-                <input name="priceId" type="hidden" value={proPrice ?? ''} />
-                <button type="submit">
-                  <ArrowUpRight size={17} />
-                  Upgrade
-                </button>
-              </form>
+              <a className="primary-action" href="/pricing">
+                <ArrowUpRight size={17} />
+                Manage plan
+              </a>
               <form action={openBillingPortalAction}>
                 <button className="secondary-action" type="submit">
                   Portal

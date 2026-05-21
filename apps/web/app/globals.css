@@ -123,6 +123,29 @@ a {
   gap: 10px;
 }
 
+.setup-banner {
+  align-items: flex-start;
+  background: #fff7df;
+  border: 1px solid #ead291;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 12px;
+  margin-top: 8px;
+  max-width: 620px;
+  padding: 12px 14px;
+}
+
+.setup-banner strong,
+.setup-banner span {
+  display: block;
+}
+
+.setup-banner span {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 2px;
+}
+
 .primary-action {
   background: var(--blue);
   border-color: var(--blue);
@@ -413,6 +436,110 @@ a {
   height: 100%;
 }
 
+.pricing-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 40px;
+}
+
+.plan-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 26px 22px;
+}
+
+.plan-card.current {
+  border-color: var(--blue);
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+.plan-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-card-head p {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin: 6px 0 0;
+}
+
+.plan-price {
+  align-items: baseline;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 34px;
+  font-weight: 700;
+  gap: 4px;
+  letter-spacing: -0.02em;
+}
+
+.plan-price small {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.plan-features {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plan-features li {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  font-size: 14px;
+  gap: 10px;
+}
+
+.plan-features li svg {
+  color: var(--green);
+}
+
+.plan-card-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quota-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.quota-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quota-row header {
+  align-items: baseline;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+}
+
+.quota-row header span {
+  color: var(--muted);
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -425,6 +552,10 @@ a {
   .metric-grid,
   .two-column,
   .public-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-grid {
     grid-template-columns: 1fr;
   }
 
