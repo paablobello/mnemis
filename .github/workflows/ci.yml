@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -12,6 +15,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -28,6 +32,10 @@ jobs:
     env:
       DATABASE_URL: postgres://mnemis:mnemis_dev@localhost:5432/mnemis
       INTERNAL_AUTH_SECRET: ci-secret-not-real
+      MNEMIS_ALLOW_LOCAL_SOURCES: 'true'
+      STRIPE_PRICE_BUILDER: price_ci_builder
+      STRIPE_PRICE_TEAM: price_ci_team
+      STRIPE_PRICE_BUSINESS: price_ci_business
     steps:
       - uses: actions/checkout@v4
 
@@ -50,8 +58,12 @@ jobs:
 
       - name: Push schema to test DB
         run: bun run db:push:ci
-        env:
-          DATABASE_URL: postgres://mnemis:mnemis_dev@localhost:5432/mnemis
+
+      - name: Seed test plans
+        run: bun --filter @mnemis/db seed:plans
 
       - name: Test
         run: bun run test
+
+      - name: Build
+        run: bun run build
