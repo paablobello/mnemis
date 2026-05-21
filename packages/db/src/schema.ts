@@ -2,6 +2,7 @@ import { relations, sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -152,6 +153,10 @@ export const workspaceMembers = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.workspaceId, t.userId] }),
+    roleCheck: check(
+      'workspace_members_role_check',
+      sql`${t.role} in ('owner', 'admin', 'member')`,
+    ),
   }),
 );
 
@@ -239,6 +244,18 @@ export const sources = pgTable(
       t.workspaceId,
       t.identifier,
     ),
+    kindCheck: check(
+      'sources_kind_check',
+      sql`${t.kind} in ('github_repo', 'docs_site', 'web_page', 'pdf_document', 'academic_paper', 'research_collection')`,
+    ),
+    statusCheck: check(
+      'sources_status_check',
+      sql`${t.status} in ('pending', 'indexing', 'indexed', 'failed')`,
+    ),
+    indexStrategyCheck: check(
+      'sources_index_strategy_check',
+      sql`${t.indexStrategy} in ('manual', 'webhook', 'cron')`,
+    ),
   }),
 );
 
@@ -269,6 +286,14 @@ export const researchRuns = pgTable(
       t.workspaceId,
       t.createdAt,
     ),
+    depthCheck: check(
+      'research_runs_depth_check',
+      sql`${t.depth} in ('quick', 'standard', 'deep')`,
+    ),
+    statusCheck: check(
+      'research_runs_status_check',
+      sql`${t.status} in ('queued', 'processing', 'completed', 'failed')`,
+    ),
   }),
 );
 
@@ -295,6 +320,10 @@ export const researchRunSources = pgTable(
     pk: primaryKey({ columns: [t.researchRunId, t.sourceId] }),
     workspaceIdx: index('research_run_sources_workspace_idx').on(t.workspaceId),
     sourceIdx: index('research_run_sources_source_idx').on(t.sourceId),
+    statusCheck: check(
+      'research_run_sources_status_check',
+      sql`${t.status} in ('pending', 'indexed', 'failed', 'skipped')`,
+    ),
   }),
 );
 
@@ -419,6 +448,14 @@ export const memories = pgTable(
       t.embedding.op('vector_cosine_ops'),
     ),
     bodyTsvIdx: index('memories_body_tsv_idx').using('gin', t.bodyTsv),
+    kindCheck: check(
+      'memories_kind_check',
+      sql`${t.kind} in ('working', 'session', 'fact', 'procedural')`,
+    ),
+    confidenceCheck: check(
+      'memories_confidence_check',
+      sql`${t.confidence} is null or (${t.confidence} >= 0 and ${t.confidence} <= 1)`,
+    ),
   }),
 );
 
@@ -444,6 +481,14 @@ export const jobs = pgTable(
   (t) => ({
     statusScheduledIdx: index('jobs_status_scheduled_idx').on(t.status, t.scheduledAt),
     workspaceIdx: index('jobs_workspace_idx').on(t.workspaceId),
+    kindCheck: check(
+      'jobs_kind_check',
+      sql`${t.kind} in ('index_source', 'reindex_source', 'research_run', 'embed_chunks', 'rerank_warmup')`,
+    ),
+    statusCheck: check(
+      'jobs_status_check',
+      sql`${t.status} in ('queued', 'processing', 'completed', 'failed')`,
+    ),
   }),
 );
 
@@ -470,6 +515,10 @@ export const usageEvents = pgTable(
     ),
     apiKeyOccurredIdx: index('usage_events_api_key_occurred_idx').on(t.apiKeyId, t.occurredAt),
     kindIdx: index('usage_events_kind_idx').on(t.kind),
+    kindCheck: check(
+      'usage_events_kind_check',
+      sql`${t.kind} in ('request', 'search', 'save', 'index', 'research', 'rerank', 'synthesize')`,
+    ),
   }),
 );
 

@@ -13,6 +13,7 @@
       ".turbo",
       ".next",
       "**/.next",
+      "**/.claude/settings.local.json",
       "**/.clerk",
       "**/next-env.d.ts",
       "coverage",

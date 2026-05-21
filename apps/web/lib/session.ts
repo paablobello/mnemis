@@ -1,8 +1,11 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { ensureSaasWorkspace } from '@mnemis/saas';
+import { requireClerkConfig } from './config';
 import { getDashboardDb } from './db';
 
 export async function requireDashboardContext() {
+  requireClerkConfig();
+
   const authState = await auth();
   const clerkUser = await currentUser();
   if (!clerkUser) throw new Error('Clerk user is required');

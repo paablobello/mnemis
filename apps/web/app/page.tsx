@@ -1,13 +1,11 @@
-import { SignInButton, SignUpButton } from '@clerk/nextjs';
-import { auth } from '@clerk/nextjs/server';
-import { ArrowRight, DatabaseZap, FileSearch, KeyRound, Radar } from 'lucide-react';
-import { redirect } from 'next/navigation';
+import { AlertTriangle, DatabaseZap, FileSearch, KeyRound, Radar } from 'lucide-react';
+import { isClerkConfigured, missingClerkEnv } from '../lib/config';
+import { PublicAuthActions } from './clerk-controls';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HomePage() {
-  const { userId } = await auth();
-  if (userId) redirect('/dashboard');
+export default function HomePage() {
+  const clerkConfigured = isClerkConfigured();
 
   return (
     <main className="public-shell">
@@ -21,19 +19,17 @@ export default async function HomePage() {
           Hosted workspace control for MCP agents, indexed sources, cited search, PDFs, papers, and
           repeatable research runs.
         </p>
-        <div className="hero-actions">
-          <SignUpButton mode="modal">
-            <button className="primary-action" type="button">
-              Start beta
-              <ArrowRight size={18} />
-            </button>
-          </SignUpButton>
-          <SignInButton mode="modal">
-            <button className="secondary-action" type="button">
-              Sign in
-            </button>
-          </SignInButton>
-        </div>
+        {clerkConfigured ? (
+          <PublicAuthActions />
+        ) : (
+          <output className="setup-banner">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>Dashboard auth is not configured.</strong>
+              <span>Missing {missingClerkEnv().join(', ')}.</span>
+            </div>
+          </output>
+        )}
       </section>
 
       <section className="public-grid" aria-label="Product areas">
