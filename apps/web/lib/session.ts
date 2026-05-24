@@ -1,9 +1,10 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
-import { ensureSaasWorkspace } from '@mnemis/saas';
+import { ensureSaasWorkspace, getDashboardSnapshot } from '@mnemis/saas';
+import { cache } from 'react';
 import { requireClerkConfig } from './config';
 import { getDashboardDb } from './db';
 
-export async function requireDashboardContext() {
+export const requireDashboardContext = cache(async () => {
   requireClerkConfig();
 
   const authState = await auth();
@@ -22,4 +23,9 @@ export async function requireDashboardContext() {
     workspaceExternalId: authState.orgId ?? null,
     workspaceName: authState.orgSlug ?? null,
   });
-}
+});
+
+export const getCachedDashboardSnapshot = cache(async () => {
+  const context = await requireDashboardContext();
+  return getDashboardSnapshot(getDashboardDb(), context);
+});

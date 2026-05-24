@@ -49,8 +49,8 @@ export async function createApiKeyAction(formData: FormData) {
     maxAge: 120,
     path: '/dashboard',
   });
-  revalidatePath('/dashboard');
-  redirect('/dashboard');
+  revalidatePath('/dashboard/keys');
+  redirect('/dashboard/keys');
 }
 
 export async function revokeApiKeyAction(formData: FormData) {
@@ -58,8 +58,8 @@ export async function revokeApiKeyAction(formData: FormData) {
   const id = stringValue(formData, 'id');
   if (id) await revokeWorkspaceApiKey(getDashboardDb(), context.workspace.id, id);
   await setFlash('API key revoked.');
-  revalidatePath('/dashboard');
-  redirect('/dashboard');
+  revalidatePath('/dashboard/keys');
+  redirect('/dashboard/keys');
 }
 
 export async function createSourceAction(formData: FormData) {
@@ -70,7 +70,7 @@ export async function createSourceAction(formData: FormData) {
 
   if (!['docs_site', 'web_page', 'pdf_document'].includes(kind)) {
     await setFlash('Unsupported source type.');
-    redirect('/dashboard');
+    redirect('/dashboard/sources');
   }
 
   try {
@@ -86,8 +86,8 @@ export async function createSourceAction(formData: FormData) {
     await setFlash(err instanceof Error ? err.message : 'Could not create source.');
   }
 
-  revalidatePath('/dashboard');
-  redirect('/dashboard');
+  revalidatePath('/dashboard/sources');
+  redirect('/dashboard/sources');
 }
 
 export async function createResearchAction(formData: FormData) {
@@ -105,15 +105,15 @@ export async function createResearchAction(formData: FormData) {
   } catch (err) {
     await setFlash(err instanceof Error ? err.message : 'Could not create research run.');
   }
-  revalidatePath('/dashboard');
-  redirect('/dashboard');
+  revalidatePath('/dashboard/research');
+  redirect('/dashboard/research');
 }
 
 export async function openBillingPortalAction() {
   const context = await requireDashboardContext();
   if (missingStripeBillingEnv().length > 0) {
     await setFlash('Stripe billing is not configured.');
-    redirect('/dashboard');
+    redirect('/dashboard/billing');
   }
 
   const [customer] = await getDashboardDb()
@@ -124,12 +124,12 @@ export async function openBillingPortalAction() {
 
   if (!customer) {
     await setFlash('Create a subscription before opening the billing portal.');
-    redirect('/dashboard');
+    redirect('/dashboard/billing');
   }
 
   const session = await getStripe().billingPortal.sessions.create({
     customer: customer.stripeCustomerId,
-    return_url: `${appUrl()}/dashboard`,
+    return_url: `${appUrl()}/dashboard/billing`,
   });
   redirect(session.url);
 }

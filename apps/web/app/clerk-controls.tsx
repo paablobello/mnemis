@@ -20,11 +20,11 @@ export function PublicAuthActions() {
     <ClerkProvider>
       <Show when="signed-in">
         <div className="hero-actions">
-          <a className="primary-action" href="/dashboard">
+          <a className="btn btn-accent" href="/dashboard">
             Dashboard
-            <ArrowRight size={18} />
+            <ArrowRight size={16} />
           </a>
-          <a className="secondary-action" href="/pricing">
+          <a className="btn btn-outline" href="/pricing">
             View pricing
           </a>
         </div>
@@ -32,17 +32,17 @@ export function PublicAuthActions() {
       <Show when="signed-out">
         <div className="hero-actions">
           <SignUpButton mode="modal">
-            <button className="primary-action" type="button">
+            <button className="btn btn-accent" type="button">
               Start beta
-              <ArrowRight size={18} />
+              <ArrowRight size={16} />
             </button>
           </SignUpButton>
           <SignInButton mode="modal">
-            <button className="secondary-action" type="button">
+            <button className="btn btn-outline" type="button">
               Sign in
             </button>
           </SignInButton>
-          <a className="secondary-action" href="/pricing">
+          <a className="btn btn-ghost" href="/pricing">
             View pricing
           </a>
         </div>
@@ -53,9 +53,9 @@ export function PublicAuthActions() {
 
 export function DashboardAuthControls() {
   return (
-    <ClerkProvider>
+    <>
       <OrganizationSwitcher hidePersonal />
       <UserButton />
-    </ClerkProvider>
+    </>
   );
 }

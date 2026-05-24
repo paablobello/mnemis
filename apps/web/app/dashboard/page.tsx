@@ -1,351 +1,303 @@
-import { getDashboardSnapshot } from '@mnemis/saas';
 import {
   Activity,
   AlertTriangle,
-  ArrowUpRight,
-  BookOpen,
-  CreditCard,
+  CircleDot,
   Database,
-  FileSearch,
-  KeyRound,
+  FlaskConical,
+  Key,
+  Layers,
   Plus,
   RefreshCw,
-  Search,
-  ServerCog,
   ShieldCheck,
   Terminal,
+  X,
+  Zap,
 } from 'lucide-react';
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { isClerkConfigured } from '../../lib/config';
-import { getDashboardDb } from '../../lib/db';
-import { requireDashboardContext } from '../../lib/session';
-import { DashboardAuthControls } from '../clerk-controls';
-import {
-  createApiKeyAction,
-  createResearchAction,
-  createSourceAction,
-  openBillingPortalAction,
-  revokeApiKeyAction,
-} from './actions';
+import Link from 'next/link';
+import { getCachedDashboardSnapshot } from '../../lib/session';
 
-export const dynamic = 'force-dynamic';
-
-function date(value: Date | string | null | undefined): string {
-  if (!value) return 'Never';
-  return new Intl.DateTimeFormat('en', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+function formatNumber(value: number): string {
+  return value.toLocaleString('en-US');
 }
 
-function pct(used: number, total: number): number {
-  if (total <= 0) return 0;
-  return Math.min(100, Math.round((used / total) * 100));
+function formatPeriodEnd(value: Date | string | null | undefined): string {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(new Date(value));
 }
 
-function statusClass(status: string): string {
-  if (status === 'indexed' || status === 'active') return 'pill good';
-  if (status === 'failed' || status === 'past_due' || status === 'canceled') return 'pill bad';
-  return 'pill neutral';
-}
-
-function QuotaRow({
+function Metric({
   label,
-  used,
-  max,
-  suffix,
+  value,
+  delta,
+  deltaDir,
+  icon: Icon,
 }: {
   label: string;
-  used: number;
-  max: number | null;
-  suffix?: string;
+  value: string;
+  delta?: string;
+  deltaDir?: 'up' | 'down' | '';
+  icon: typeof Database;
 }) {
-  const unlimited = max === null;
-  const percent = unlimited ? 0 : pct(used, max);
-  const usedLabel = used.toLocaleString('en-US');
-  const maxLabel = unlimited ? 'Unlimited' : max.toLocaleString('en-US');
   return (
-    <div className="quota-row">
-      <header>
-        <strong>{label}</strong>
-        <span>
-          {unlimited ? `${usedLabel} used · Unlimited` : `${usedLabel} of ${maxLabel}`}
-          {suffix ? ` · ${suffix}` : ''}
-        </span>
-      </header>
-      {unlimited ? null : (
-        <div className="usage-bar" aria-label={`${label} usage`}>
-          <span style={{ width: `${percent}%` }} />
-        </div>
-      )}
-    </div>
+    <article className="metric">
+      <div className="label">
+        <Icon size={13} />
+        {label}
+      </div>
+      <div className="value">{value}</div>
+      {delta ? <div className={`delta ${deltaDir ?? ''}`}>{delta}</div> : null}
+    </article>
   );
 }
 
-export default async function DashboardPage() {
-  if (!isClerkConfigured()) redirect('/?setup=missing-clerk');
-
-  const context = await requireDashboardContext();
-  const snapshot = await getDashboardSnapshot(getDashboardDb(), context);
+export default async function OverviewPage() {
+  const snapshot = await getCachedDashboardSnapshot();
   const cookieStore = await cookies();
   const newKey = cookieStore.get('mnemis_new_api_key')?.value ?? null;
   const flash = cookieStore.get('mnemis_dashboard_flash')?.value ?? null;
-  const apiUrl =
-    process.env.NEXT_PUBLIC_MNEMIS_API_URL ?? process.env.MNEMIS_API_URL ?? 'http://localhost:8787';
+
+  const periodEnd = formatPeriodEnd(snapshot.usage.period_end);
+  const userFirstName =
+    snapshot.user.name?.split(' ')[0] ?? snapshot.user.email.split('@')[0] ?? 'there';
+
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <ServerCog size={20} />
-          <span>Mnemis</span>
+    <div className="page">
+      <div className="page-head">
+        <div className="title">
+          <div className="row" style={{ marginBottom: 4, gap: 6 }}>
+            <span className="eyebrow">Workspace</span>
+            <span className="subtle" style={{ fontSize: 11 }}>
+              ·
+            </span>
+            <span className="eyebrow">Live</span>
+          </div>
+          <h1>Welcome back, {userFirstName}</h1>
+          <p>
+            {snapshot.counts.chunks > 0
+              ? `Your agents indexed ${formatNumber(snapshot.counts.chunks)} chunks across ${formatNumber(
+                  snapshot.counts.sources,
+                )} sources and ran ${formatNumber(snapshot.counts.research_runs)} research jobs.`
+              : 'Add a source and queue a research run to get started.'}
+          </p>
         </div>
-        <nav aria-label="Dashboard sections">
-          <a href="#overview">
-            <Activity size={17} />
-            Overview
-          </a>
-          <a href="#sources">
-            <Database size={17} />
-            Sources
-          </a>
-          <a href="#research">
-            <FileSearch size={17} />
-            Research
-          </a>
-          <a href="#agent">
-            <Terminal size={17} />
-            Agent setup
-          </a>
-          <a href="#billing">
-            <CreditCard size={17} />
-            Billing
-          </a>
-        </nav>
-      </aside>
+        <div className="row">
+          <Link className="btn btn-outline btn-sm" href="/dashboard">
+            <RefreshCw size={13} />
+            Refresh
+          </Link>
+          <Link className="btn btn-accent btn-sm" href="/dashboard/research">
+            <Plus size={14} />
+            New research
+          </Link>
+        </div>
+      </div>
 
-      <section className="workspace">
-        <header className="topbar">
+      {flash ? <div className="notice">{flash}</div> : null}
+      {newKey ? (
+        <div className="secret-banner">
+          <ShieldCheck size={18} />
           <div>
-            <p className="eyebrow">Beta workspace</p>
-            <h1>{snapshot.workspace.name}</h1>
+            <strong>New API key created. Store it now.</strong>
+            <code>{newKey}</code>
           </div>
-          <div className="topbar-actions">
-            <DashboardAuthControls />
+        </div>
+      ) : null}
+
+      <section className="metric-row">
+        <Metric
+          label="Sources"
+          value={formatNumber(snapshot.counts.sources)}
+          delta={`${snapshot.counts.indexed_sources} indexed`}
+          icon={Database}
+        />
+        <Metric
+          label="Research runs"
+          value={formatNumber(snapshot.counts.research_runs)}
+          delta={`${snapshot.counts.queued_jobs} queued`}
+          icon={FlaskConical}
+        />
+        <Metric
+          label="Memories"
+          value={formatNumber(snapshot.counts.memories)}
+          delta={`${formatNumber(snapshot.counts.chunks)} chunks`}
+          icon={Layers}
+        />
+        <Metric
+          label="Credits used"
+          value={formatNumber(snapshot.usage.credits_used)}
+          delta={
+            snapshot.usage.credits_unlimited
+              ? 'unlimited'
+              : `of ${formatNumber(snapshot.usage.credits_limit)} · resets ${periodEnd}`
+          }
+          icon={Zap}
+        />
+      </section>
+
+      {snapshot.counts.failed_jobs > 0 ? (
+        <div className="banner warn" style={{ marginBottom: 16 }}>
+          <AlertTriangle size={15} />
+          <div className="grow">
+            <strong>{snapshot.counts.failed_jobs} failed jobs</strong>{' '}
+            <span className="muted">need review. Retry from the Research page.</span>
           </div>
-        </header>
+          <Link className="btn btn-soft btn-sm" href="/dashboard/research">
+            <RefreshCw size={13} />
+            Review
+          </Link>
+          <button className="btn btn-ghost btn-sm" type="button">
+            <X size={13} />
+          </button>
+        </div>
+      ) : null}
 
-        {flash ? <div className="notice">{flash}</div> : null}
-        {newKey ? (
-          <div className="secret-banner">
-            <ShieldCheck size={18} />
-            <div>
-              <strong>New API key created. Store it now.</strong>
-              <code>{newKey}</code>
+      <div className="two-col">
+        <article className="card">
+          <header className="section-head">
+            <div className="left">
+              <Activity size={15} className="lead" />
+              <h2>Recent sources</h2>
             </div>
-          </div>
-        ) : null}
+            <div className="right">
+              <Link className="btn btn-ghost btn-sm" href="/dashboard/sources">
+                View all
+              </Link>
+            </div>
+          </header>
+          {snapshot.recent_sources.length === 0 ? (
+            <p className="empty">No sources yet — add one to start indexing.</p>
+          ) : (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Kind</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.recent_sources.slice(0, 6).map((source) => {
+                  const status = source.status;
+                  const cls =
+                    status === 'indexed'
+                      ? 'success'
+                      : status === 'failed'
+                        ? 'danger'
+                        : status === 'indexing'
+                          ? 'accent'
+                          : '';
+                  return (
+                    <tr key={source.id}>
+                      <td>
+                        <div className="cell-pri">{source.displayName}</div>
+                        <div className="cell-sec mono">{source.identifier}</div>
+                      </td>
+                      <td>
+                        <span className="badge outline" style={{ textTransform: 'capitalize' }}>
+                          {source.kind.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`badge ${cls}`}>{status}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </article>
 
-        <section id="overview" className="metric-grid">
-          <article className="metric">
-            <span>Sources</span>
-            <strong>{snapshot.counts.sources}</strong>
-            <small>{snapshot.counts.indexed_sources} indexed</small>
-          </article>
-          <article className="metric">
-            <span>Research runs</span>
-            <strong>{snapshot.counts.research_runs}</strong>
-            <small>{snapshot.counts.queued_jobs} jobs queued</small>
-          </article>
-          <article className="metric">
-            <span>Memories</span>
-            <strong>{snapshot.counts.memories}</strong>
-            <small>{snapshot.counts.chunks} indexed chunks</small>
-          </article>
-          <article className="metric">
-            <span>Credits</span>
-            <strong>
-              {snapshot.usage.credits_unlimited
-                ? 'Unlimited'
-                : snapshot.usage.credits_remaining.toLocaleString('en-US')}
-            </strong>
-            <small>{snapshot.usage.credits_used} used this month</small>
-          </article>
-        </section>
-
-        <section className="two-column">
-          <article id="sources" className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Knowledge</p>
-                <h2>Sources</h2>
+        <div className="stack">
+          <article className="card">
+            <header className="section-head">
+              <div className="left">
+                <Zap size={15} className="lead" />
+                <h2>Quick actions</h2>
               </div>
-              <Database size={19} />
-            </div>
-            <form className="inline-form" action={createSourceAction}>
-              <select name="kind" aria-label="Source type" defaultValue="docs_site">
-                <option value="docs_site">Docs site</option>
-                <option value="web_page">Web page</option>
-                <option value="pdf_document">PDF</option>
-              </select>
-              <input name="identifier" type="url" placeholder="https://docs.example.com" required />
-              <input name="displayName" placeholder="Display name" />
-              <button type="submit" title="Queue source">
-                <Plus size={17} />
-                Queue
-              </button>
-            </form>
-            <div className="table-list">
-              {snapshot.recent_sources.length === 0 ? (
-                <p className="empty">No sources yet.</p>
-              ) : (
-                snapshot.recent_sources.map((source) => (
-                  <div className="row" key={source.id}>
-                    <div>
-                      <strong>{source.displayName}</strong>
-                      <span>{source.identifier}</span>
-                    </div>
-                    <span className={statusClass(source.status)}>{source.status}</span>
-                  </div>
-                ))
-              )}
+            </header>
+            <div className="qa-grid">
+              <Link className="qa-item primary" href="/dashboard/research">
+                <div className="ico">
+                  <FlaskConical size={15} />
+                </div>
+                <div className="text">
+                  <strong>Start research run</strong>
+                  <span>Deep, cited search across your sources</span>
+                </div>
+              </Link>
+              <Link className="qa-item" href="/dashboard/sources">
+                <div className="ico">
+                  <Database size={15} />
+                </div>
+                <div className="text">
+                  <strong>Add a source</strong>
+                  <span>Docs, papers, PDFs, web pages, repos</span>
+                </div>
+              </Link>
+              <Link className="qa-item" href="/dashboard/keys">
+                <div className="ico">
+                  <Key size={15} />
+                </div>
+                <div className="text">
+                  <strong>Create API key</strong>
+                  <span>Connect Cursor, Claude, Codex via MCP</span>
+                </div>
+              </Link>
+              <Link className="qa-item" href="/dashboard/keys">
+                <div className="ico">
+                  <Terminal size={15} />
+                </div>
+                <div className="text">
+                  <strong>Open MCP setup</strong>
+                  <span>One-line CLI to wire your agent</span>
+                </div>
+              </Link>
             </div>
           </article>
 
-          <article id="research" className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Discovery</p>
-                <h2>Research run</h2>
+          <article className="card">
+            <header className="section-head">
+              <div className="left">
+                <Activity size={15} className="lead" />
+                <h2>System status</h2>
               </div>
-              <Search size={19} />
-            </div>
-            <form className="stack-form" action={createResearchAction}>
-              <textarea
-                name="query"
-                placeholder="Find state-of-the-art approaches for agent memory and cited research over PDFs"
-                required
-              />
-              <div className="form-row">
-                <select name="depth" defaultValue="standard" aria-label="Research depth">
-                  <option value="quick">Quick</option>
-                  <option value="standard">Standard</option>
-                  <option value="deep">Deep</option>
-                </select>
-                <button type="submit">
-                  <FileSearch size={17} />
-                  Start research
-                </button>
+              <div className="right">
+                <span className="badge success">
+                  <span className="dot" />
+                  All systems normal
+                </span>
               </div>
-            </form>
-            {snapshot.counts.failed_jobs > 0 ? (
-              <div className="risk-line">
-                <AlertTriangle size={17} />
-                {snapshot.counts.failed_jobs} failed jobs need review.
-              </div>
-            ) : (
-              <div className="ok-line">
-                <ShieldCheck size={17} />
-                No failed jobs in this workspace.
-              </div>
-            )}
-          </article>
-        </section>
-
-        <section className="two-column">
-          <article id="agent" className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Agent access</p>
-                <h2>MCP and API keys</h2>
-              </div>
-              <KeyRound size={19} />
-            </div>
-            <form className="inline-form compact" action={createApiKeyAction}>
-              <input name="name" placeholder="Cursor / Claude / Codex key" />
-              <button type="submit">
-                <KeyRound size={17} />
-                Create key
-              </button>
-            </form>
-            <pre className="command">{`MNEMIS_API_URL=${apiUrl}
-MNEMIS_API_KEY=mn_...
-npx @mnemis/mcp`}</pre>
-            <div className="table-list">
-              {snapshot.api_keys.map((key) => (
-                <div className="row" key={key.id}>
-                  <div>
-                    <strong>{key.name}</strong>
-                    <span>
-                      {key.prefix}... · last used {date(key.lastUsedAt)} · created{' '}
-                      {date(key.createdAt)}
-                    </span>
-                  </div>
-                  {key.revokedAt ? (
-                    <span className="pill bad">revoked</span>
-                  ) : (
-                    <form action={revokeApiKeyAction}>
-                      <input name="id" type="hidden" value={key.id} />
-                      <button className="icon-button" type="submit" title="Revoke key">
-                        <RefreshCw size={16} />
-                      </button>
-                    </form>
-                  )}
+            </header>
+            <div style={{ padding: '8px 16px 16px' }}>
+              {[
+                { name: 'API', value: 'operational' },
+                { name: 'Vector store', value: 'operational' },
+                {
+                  name: 'Indexer workers',
+                  value: `${snapshot.counts.queued_jobs} queued`,
+                },
+                { name: 'Webhooks', value: 'operational' },
+              ].map((row) => (
+                <div
+                  key={row.name}
+                  className="row between"
+                  style={{ padding: '6px 0', fontSize: 13 }}
+                >
+                  <span className="row" style={{ gap: 8 }}>
+                    <CircleDot size={11} style={{ color: 'var(--success)' }} />
+                    <span>{row.name}</span>
+                  </span>
+                  <span className="muted mono" style={{ fontSize: 12 }}>
+                    {row.value}
+                  </span>
                 </div>
               ))}
             </div>
           </article>
-
-          <article id="billing" className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Commercial control</p>
-                <h2>Billing and usage</h2>
-              </div>
-              <CreditCard size={19} />
-            </div>
-            <div className="billing-state">
-              <BookOpen size={17} />
-              <span>
-                Plan: <strong>{snapshot.plan.name}</strong> ·{' '}
-                {snapshot.subscription?.status ?? 'free'}
-              </span>
-            </div>
-            <div className="quota-stack">
-              <QuotaRow
-                label="Credits"
-                used={snapshot.usage.credits_used}
-                max={snapshot.usage.credits_unlimited ? null : snapshot.usage.credits_limit}
-                suffix={`Period resets ${date(snapshot.usage.period_end)}`}
-              />
-              <QuotaRow
-                label="Sources"
-                used={snapshot.quotas.sources.used}
-                max={snapshot.quotas.sources.max}
-              />
-              <QuotaRow
-                label="Research runs"
-                used={snapshot.quotas.research_runs.used}
-                max={snapshot.quotas.research_runs.max}
-                suffix="this month"
-              />
-            </div>
-            <div className="billing-actions">
-              <a className="primary-action" href="/pricing">
-                <ArrowUpRight size={17} />
-                Manage plan
-              </a>
-              <form action={openBillingPortalAction}>
-                <button className="secondary-action" type="submit">
-                  Portal
-                </button>
-              </form>
-            </div>
-          </article>
-        </section>
-      </section>
-    </main>
+        </div>
+      </div>
+    </div>
   );
 }

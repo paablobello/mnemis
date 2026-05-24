@@ -70,7 +70,7 @@ export default async function PricingPage() {
   const page = (
     <main className="public-shell">
       <header className="public-hero">
-        <Link href="/" className="brand-mark" style={{ textDecoration: 'none' }}>
+        <Link href="/" className="brand-mark">
           <Radar size={20} />
           <span>Mnemis</span>
         </Link>
@@ -81,95 +81,122 @@ export default async function PricingPage() {
         </p>
       </header>
 
-      <section className="pricing-grid" aria-label="Plans">
+      <section className="plan-grid" aria-label="Plans">
         {tiers.map((tier) => {
           const isCurrent = currentPlanId === tier.id;
           return (
             <article key={tier.id} className={`plan-card${isCurrent ? ' current' : ''}`}>
-              <header className="plan-card-head">
+              <div>
                 <span className="eyebrow">{tier.name}</span>
-                <strong className="plan-price">
+                <div className="price" style={{ marginTop: 6 }}>
                   {tier.priceLabel}
                   {tier.hasStripePrice ? <small>/mo</small> : null}
-                </strong>
-                {tier.description ? <p>{tier.description}</p> : null}
-              </header>
+                </div>
+                {tier.description ? (
+                  <p className="muted" style={{ fontSize: 13, margin: '8px 0 0', lineHeight: 1.5 }}>
+                    {tier.description}
+                  </p>
+                ) : null}
+              </div>
               <ul className="plan-features">
                 <li>
-                  <Check size={16} />
+                  <Check size={14} />
                   {fmt(tier.monthlyCredits, 'credits/mo')}
                 </li>
                 <li>
-                  <Check size={16} />
+                  <Check size={14} />
                   {fmt(tier.maxSources, 'sources')}
                 </li>
                 <li>
-                  <Check size={16} />
+                  <Check size={14} />
                   {fmt(tier.maxResearchRunsPerMonth, 'research runs/mo')}
                 </li>
               </ul>
-              <footer className="plan-card-foot">
+              <div style={{ marginTop: 'auto', display: 'grid', gap: 8 }}>
                 {isCurrent ? (
-                  <span className="pill good">Current plan</span>
+                  <span
+                    className="badge success"
+                    style={{ justifyContent: 'center', padding: '6px 10px' }}
+                  >
+                    Current plan
+                  </span>
                 ) : tier.hasStripePrice ? (
                   clerkConfigured ? (
                     <Show when="signed-in">
                       <form action={subscribeToTierAction}>
                         <input type="hidden" name="planId" value={tier.id} />
-                        <button className="primary-action" type="submit">
+                        <button
+                          className="btn btn-accent"
+                          type="submit"
+                          style={{ width: '100%', justifyContent: 'center' }}
+                        >
                           Subscribe
-                          <ArrowRight size={16} />
+                          <ArrowRight size={14} />
                         </button>
                       </form>
                     </Show>
                   ) : null
                 ) : (
-                  <span className="pill neutral">No payment required</span>
+                  <span
+                    className="badge accent"
+                    style={{ justifyContent: 'center', padding: '6px 10px' }}
+                  >
+                    No payment required
+                  </span>
                 )}
                 {tier.hasStripePrice && clerkConfigured ? (
                   <Show when="signed-out">
                     <SignInButton mode="modal">
-                      <button className="primary-action" type="button">
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        style={{ width: '100%', justifyContent: 'center' }}
+                      >
                         Sign in to subscribe
-                        <ArrowRight size={16} />
+                        <ArrowRight size={14} />
                       </button>
                     </SignInButton>
                   </Show>
                 ) : null}
-              </footer>
+              </div>
             </article>
           );
         })}
 
-        <article className="plan-card enterprise">
-          <header className="plan-card-head">
+        <article className="plan-card">
+          <div>
             <span className="eyebrow">Enterprise</span>
-            <strong className="plan-price">Custom</strong>
-            <p>SOC 2, SLA, dedicated support, and custom infrastructure for regulated teams.</p>
-          </header>
+            <div className="price" style={{ marginTop: 6 }}>
+              Custom
+            </div>
+            <p className="muted" style={{ fontSize: 13, margin: '8px 0 0', lineHeight: 1.5 }}>
+              SOC 2, SLA, dedicated support, and custom infrastructure for regulated teams.
+            </p>
+          </div>
           <ul className="plan-features">
             <li>
-              <Check size={16} />
+              <Check size={14} />
               Unlimited everything
             </li>
             <li>
-              <Check size={16} />
+              <Check size={14} />
               SOC 2 + SLA
             </li>
             <li>
-              <Check size={16} />
+              <Check size={14} />
               Dedicated onboarding
             </li>
           </ul>
-          <footer className="plan-card-foot">
+          <div style={{ marginTop: 'auto' }}>
             <a
-              className="secondary-action"
+              className="btn btn-outline"
               href="mailto:hello@mnemis.dev?subject=Enterprise%20plan"
+              style={{ width: '100%', justifyContent: 'center' }}
             >
-              <Mail size={16} />
+              <Mail size={14} />
               Contact us
             </a>
-          </footer>
+          </div>
         </article>
       </section>
     </main>

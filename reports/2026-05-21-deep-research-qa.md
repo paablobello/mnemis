@@ -1,6 +1,6 @@
-# Deep Research QA - 2026-05-21
+# Deep Research QA - 2026-05-22
 
-Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04-7e672f7fb748`
+Workspace: `deep-research-qa-20260522001719-192d1a4c` / `54dec002-e3fa-426b-a1b3-10e944f424c2`
 
 ## Environment
 - `TAVILY_API_KEY`: set
@@ -11,19 +11,19 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 - `VOYAGE_API_KEY`: set
 - `ANTHROPIC_API_KEY`: set
 - `MNEMIS_PDF_EXTRACTOR_URL`: set
-- `MNEMIS_DEEP_QA_FORCE_SIDECAR`: set
+- `MNEMIS_DEEP_QA_FORCE_SIDECAR`: empty
 - PDF sidecar health: `{"ok":true,"docling_available":true,"grobid_enabled":true}`
 
 ## Checks
 ### PASS - web discovery: Tavily + Exa candidates
-- Duration: 1776ms
+- Duration: 2890ms
 
 ```json
 {
   "candidates": 12,
   "providers": {
     "tavily": 12,
-    "exa": 1
+    "exa": 2
   },
   "issues": [
     "brave: brave_not_configured"
@@ -32,14 +32,8 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     {
       "provider": "tavily",
       "kind": "web_page",
-      "title": "How #useActionState simplifies React 19 forms with server actions | Jiya Agrawal posted on the topic",
-      "url": "https://www.linkedin.com/posts/jiyaagrawal_reactjs-tip-useactionstate-activity-7376204540649324544-y4bz"
-    },
-    {
-      "provider": "tavily,exa",
-      "kind": "web_page",
-      "title": "useActionState - React",
-      "url": "https://react.dev/reference/react/useActionState"
+      "title": "useActionState in React: A practical guide with examples - LogRocket Blog",
+      "url": "https://blog.logrocket.com/react-useactionstate"
     },
     {
       "provider": "tavily",
@@ -50,79 +44,86 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     {
       "provider": "tavily",
       "kind": "web_page",
-      "title": "React useActionState Hook",
-      "url": "https://codefinity.com/blog/React-useActionState-Hook"
+      "title": "How #useActionState simplifies React 19 forms with server actions | Jiya Agrawal posted on the topic",
+      "url": "https://www.linkedin.com/posts/jiyaagrawal_reactjs-tip-useactionstate-activity-7376204540649324544-y4bz"
+    },
+    {
+      "provider": "tavily,exa",
+      "kind": "web_page",
+      "title": "Simplify Form Handling in React 19: Introducing `useActionState` Hook | Senvio",
+      "url": "https://www.senvio.com/blog/simplify-form-handling-in-react-19-introducing-use"
     },
     {
       "provider": "tavily",
       "kind": "web_page",
-      "title": "Exploring React 19: New Features vs. Traditional Methods",
-      "url": "https://devm.io/javascript/react-19-new-features"
+      "title": "React useActionState Hook",
+      "url": "https://codefinity.com/blog/React-useActionState-Hook"
     }
   ]
 }
 ```
 
 ### PASS - academic discovery: papers and PDFs
-- Duration: 2013ms
+- Duration: 1675ms
 
 ```json
 {
   "candidates": 12,
   "providers": {
-    "semantic_scholar": 12,
-    "crossref": 1
+    "openalex": 12
   },
-  "issues": [],
+  "issues": [
+    "semantic_scholar: HTTP 429: {\"message\": \"Too Many Requests. Please wait and try again or apply for a key for higher rate limits. https://www.semanticscholar.org/product/api#api-key-form\", \"code\": \"429\"}"
+  ],
   "top": [
     {
-      "provider": "semantic_scholar,crossref",
-      "title": "Systematic Evaluation of Similarity Metrics for Retrieval, Reranking, and Completion in Retrieval Au",
-      "pdfUrl": "",
-      "doi": "10.1109/etecom66111.2025.11319066",
+      "provider": "openalex",
+      "title": "A Survey of Large Language Models",
+      "pdfUrl": "https://link.springer.com/content/pdf/10.1007/s11704-026-60308-3.pdf",
+      "doi": "10.1007/s11704-026-60308-3",
+      "year": 2026
+    },
+    {
+      "provider": "openalex",
+      "title": "Large Language Models for Information Retrieval: A Survey",
+      "pdfUrl": "https://arxiv.org/pdf/2308.07107",
+      "doi": "10.48550/arxiv.2308.07107",
+      "year": 2023
+    },
+    {
+      "provider": "openalex",
+      "title": "Development and validation of an autonomous artificial intelligence agent for clinical decision-maki",
+      "pdfUrl": "https://www.nature.com/articles/s43018-025-00991-6.pdf",
+      "doi": "10.1038/s43018-025-00991-6",
       "year": 2025
     },
     {
-      "provider": "semantic_scholar",
-      "title": "Correctness is not Faithfulness in Retrieval Augmented Generation Attributions",
-      "pdfUrl": "",
-      "doi": "10.1145/3731120.3744592",
+      "provider": "openalex",
+      "title": "Retrieval-Augmented Generation (RAG) in Healthcare: A Comprehensive Review",
+      "pdfUrl": "https://www.mdpi.com/2673-2688/6/9/226/pdf?version=1757581602",
+      "doi": "10.3390/ai6090226",
       "year": 2025
     },
     {
-      "provider": "semantic_scholar",
-      "title": "Retrieval-Augmented Generation for Maternal Healthcare: Design and Evaluation of a Clinical Question",
-      "pdfUrl": "",
-      "doi": "10.1109/ENC68268.2025.11311944",
-      "year": 2025
+      "provider": "openalex",
+      "title": "The Semantic Scholar Open Data Platform",
+      "pdfUrl": "https://arxiv.org/pdf/2301.10140",
+      "doi": "10.48550/arxiv.2301.10140",
+      "year": 2023
     },
     {
-      "provider": "semantic_scholar",
-      "title": "LLM-powered threat intelligence: a retrieval-augmented generation approach for cyber attack investig",
-      "pdfUrl": "",
-      "doi": "10.7717/peerj-cs.3371",
-      "year": 2025
-    },
-    {
-      "provider": "semantic_scholar",
-      "title": "Rethinking Retrieval: From Traditional Retrieval Augmented Generation to Agentic and Non-Vector Reas",
-      "pdfUrl": "",
-      "doi": "10.48550/arXiv.2511.18177",
-      "year": 2025
-    },
-    {
-      "provider": "semantic_scholar",
-      "title": "RAG-X: Density-Adaptive Path Sampling for Enhanced Knowledge Graph-Based Retrieval Augmented Generat",
-      "pdfUrl": "",
-      "doi": "10.1109/IConSCEPT66142.2025.11437293",
-      "year": 2025
+      "provider": "openalex",
+      "title": "From text to insight: large language models for chemical data extraction",
+      "pdfUrl": "https://pubs.rsc.org/en/content/articlepdf/2025/cs/d4cs00913d",
+      "doi": "10.1039/d4cs00913d",
+      "year": 2024
     }
   ]
 }
 ```
 
 ### PASS - direct index: React docs web page
-- Duration: 700ms
+- Duration: 731ms
 
 ```json
 {
@@ -139,7 +140,7 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 ```
 
 ### PASS - direct index: technical blog web page
-- Duration: 527ms
+- Duration: 462ms
 
 ```json
 {
@@ -156,7 +157,7 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 ```
 
 ### PASS - direct index: docs site crawl
-- Duration: 9187ms
+- Duration: 15140ms
 
 ```json
 {
@@ -173,7 +174,7 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 ```
 
 ### PASS - direct index: arXiv PDF auto fast path
-- Duration: 538ms
+- Duration: 858ms
 
 ```json
 {
@@ -189,25 +190,8 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 }
 ```
 
-### PASS - direct index: arXiv PDF sidecar forced
-- Duration: 79441ms
-
-```json
-{
-  "files": 15,
-  "chunks": 37,
-  "chars": 54335,
-  "pages": 15,
-  "crawler_provider": null,
-  "pdf_extractor": "sidecar",
-  "pdf_auto_decision": null,
-  "sample_path": "pdf/1706.03762/page-1.md",
-  "sample_title": "# Attention Is All You Need"
-}
-```
-
 ### PASS - live contextual prefix: one chunk
-- Duration: 1242ms
+- Duration: 1184ms
 
 ```json
 {
@@ -221,12 +205,12 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 ```
 
 ### PASS - research run: seed URLs: docs + blog + PDF
-- Duration: 40937ms
+- Duration: 34780ms
 
 ```json
 {
-  "run_id": "caeccf3f-f0fb-48fc-b89a-7e04a8045ba1",
-  "job_id": "462a7118-4a60-4d81-9c42-29d0112c67e9",
+  "run_id": "13850494-e89e-4f10-9bdc-c680f526e3cc",
+  "job_id": "80854631-b0e2-41ff-8b4f-5dfd7faf1a4a",
   "processed": true,
   "status": "completed",
   "error": null,
@@ -274,12 +258,12 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 ```
 
 ### PASS - research run: web discovery + indexing
-- Duration: 16248ms
+- Duration: 11291ms
 
 ```json
 {
-  "run_id": "b3d88377-c867-4633-a2d2-c65a2498291c",
-  "job_id": "02ae0e43-9d78-4e5b-8787-76c83b849940",
+  "run_id": "105a274c-e40b-49fb-bd7a-2567229596ab",
+  "job_id": "c7358346-a872-419b-ac03-2de314aceb40",
   "processed": true,
   "status": "completed",
   "error": null,
@@ -290,18 +274,18 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     "brave: brave_not_configured"
   ],
   "link_statuses": {
-    "failed": 1,
-    "indexed": 3
+    "indexed": 3,
+    "failed": 1
   },
   "indexed": [
     {
       "kind": "web_page",
-      "identifier": "https://react.dev/reference/react/useActionState",
-      "provider": "tavily,exa",
-      "chunks": 42,
-      "embedded": 42,
+      "identifier": "https://blog.logrocket.com/react-useactionstate",
+      "provider": "tavily",
+      "chunks": 15,
+      "embedded": 15,
       "embedding_models": {
-        "voyage-4-large": 42
+        "voyage-4-large": 15
       }
     },
     {
@@ -316,12 +300,12 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     },
     {
       "kind": "web_page",
-      "identifier": "https://codefinity.com/blog/React-useActionState-Hook",
-      "provider": "tavily",
-      "chunks": 12,
-      "embedded": 12,
+      "identifier": "https://www.senvio.com/blog/simplify-form-handling-in-react-19-introducing-use",
+      "provider": "tavily,exa",
+      "chunks": 4,
+      "embedded": 4,
       "embedding_models": {
-        "voyage-4-large": 12
+        "voyage-4-large": 4
       }
     }
   ],
@@ -337,12 +321,12 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 ```
 
 ### PASS - research run: academic paper discovery + indexing (bounded)
-- Duration: 5697ms
+- Duration: 4208ms
 
 ```json
 {
-  "run_id": "1271e61b-b05a-4c5f-9a5e-5289154a0682",
-  "job_id": "babd9330-eb60-4227-8d92-548f7964210d",
+  "run_id": "e55960fc-1c25-4c1b-8aba-cd0a59a3f2bb",
+  "job_id": "5b988f8b-f5ab-470e-b5f1-bd04c4400a5b",
   "processed": true,
   "status": "completed",
   "error": null,
@@ -375,9 +359,9 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
 - `academic_paper` https://drops.dagstuhl.de/entities/document/10.4230/OASIcs.LDK.2019.21: status=indexed, chunks=19, pages=0, embedded=19, crawler=firecrawl, pdf=n/a
 - `pdf_document` https://arxiv.org/pdf/1706.03762: status=indexed, chunks=31, pages=15, embedded=31, crawler=n/a, pdf=unpdf
 - `web_page` https://blog.logrocket.com/react-useactionstate: status=indexed, chunks=15, pages=0, embedded=15, crawler=firecrawl, pdf=n/a
-- `web_page` https://codefinity.com/blog/React-useActionState-Hook: status=indexed, chunks=12, pages=0, embedded=12, crawler=firecrawl, pdf=n/a
 - `web_page` https://react.dev/reference/react/useActionState: status=indexed, chunks=42, pages=0, embedded=42, crawler=firecrawl, pdf=n/a
 - `web_page` https://www.linkedin.com/posts/jiyaagrawal_reactjs-tip-useactionstate-activity-7376204540649324544-y4bz: status=failed, chunks=0, pages=0, embedded=0, crawler=n/a, pdf=n/a
+- `web_page` https://www.senvio.com/blog/simplify-form-handling-in-react-19-introducing-use: status=indexed, chunks=4, pages=0, embedded=4, crawler=firecrawl, pdf=n/a
 - `web_page` https://www.telerik.com/blogs/guide-new-hooks-react-19: status=indexed, chunks=26, pages=0, embedded=26, crawler=firecrawl, pdf=n/a
 
 ## Search Checks
@@ -392,17 +376,7 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.4137371778488159,
-    "snippet": "### No signup required Check it out Galileo AI Overview - May 2025 ![Video Thumbnail](https://embed-ssl.wistia.com/deliveries/d13588ad6864cb4841845467c9b8feb8.webp?image_crop_resized=1920x1079) 1:15 Click for sound Manag"
-  },
-  {
-    "kind": "web_page",
-    "identifier": "https://blog.logrocket.com/react-useactionstate",
-    "path": "react-useactionstate.md",
-    "page": null,
-    "crawler_provider": "firecrawl",
-    "pdf_extractor": null,
-    "score": 0.22261904180049896,
+    "score": 0.21807359158992767,
     "snippet": "# useActionState in React: A practical guide with examples - LogRocket Blog [**Advisory boards aren’t only for executives. Join the LogRocket Content Advisory Board today →**](https://lp.logrocket.com/blg/content-advisor"
   },
   {
@@ -417,33 +391,43 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
   },
   {
     "kind": "web_page",
-    "identifier": "https://blog.logrocket.com/react-useactionstate",
-    "path": "react-useactionstate.md",
+    "identifier": "https://react.dev/reference/react/useActionState",
+    "path": "reference/react/useActionState.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.09477764368057251,
-    "snippet": "## Working with multiple `useActionState` Hooks So far, we’ve seen how `useActionState` can simplify a single interaction, like submitting a form or toggling a like button. But what happens when you have multiple indepen"
+    "score": 0.10337243974208832,
+    "snippet": "### My Action cannot read form data [Link for My Action cannot read form data ](https://react.dev/reference/react/useActionState\\#action-cannot-read-form-data \"Link for My Action cannot read form data \") When you use `us"
   },
   {
     "kind": "web_page",
-    "identifier": "https://codefinity.com/blog/React-useActionState-Hook",
-    "path": "blog/React-useActionState-Hook.md",
+    "identifier": "https://react.dev/reference/react/useActionState",
+    "path": "reference/react/useActionState.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.0731423944234848,
-    "snippet": "## FAQs **Q**: What is the `useActionState` hook in React 19? **A**: `useActionState` is a new React 19 hook that simplifies form management by handling state updates, errors, and pending states automatically. It elimina"
+    "score": 0.10000000149011612,
+    "snippet": "## Troubleshooting [Link for Troubleshooting ](https://react.dev/reference/react/useActionState\\#troubleshooting \"Link for Troubleshooting \")"
   },
   {
     "kind": "web_page",
-    "identifier": "https://blog.logrocket.com/react-useactionstate",
-    "path": "react-useactionstate.md",
+    "identifier": "https://react.dev/reference/react/useActionState",
+    "path": "reference/react/useActionState.md",
     "page": null,
     "crawler_provider": "firecrawl",
     "pdf_extractor": null,
-    "score": 0.06233510747551918,
-    "snippet": "### Form submission Now let’s take it a step further. Beyond simple counters, `useActionState` really shines in real-world scenarios like handling [form submissions](https://blog.logrocket.com/react-hook-form-complete-gu"
+    "score": 0.07692307978868484,
+    "snippet": "## Usage [Link for Usage ](https://react.dev/reference/react/useActionState\\#usage \"Link for Usage \")"
+  },
+  {
+    "kind": "web_page",
+    "identifier": "https://react.dev/reference/react/useActionState",
+    "path": "reference/react/useActionState.md",
+    "page": null,
+    "crawler_provider": "firecrawl",
+    "pdf_extractor": null,
+    "score": 0.06472563743591309,
+    "snippet": "# useActionState [Link for this heading](https://react.dev/reference/react/useActionState\\#undefined \"Link for this heading\") `useActionState` is a React Hook that lets you update state with side effects using [Actions]("
   }
 ]
 ```
@@ -459,8 +443,8 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     "page": 5,
     "crawler_provider": null,
     "pdf_extractor": "unpdf",
-    "score": 0.5068566799163818,
-    "snippet": "## Page 5 output values. These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2. Multi-head attention allows the model to jointly attend to information from different repr"
+    "score": 0.3333333432674408,
+    "snippet": "# arxiv.org"
   },
   {
     "kind": "pdf_document",
@@ -469,8 +453,8 @@ Workspace: `deep-research-qa-20260521185510-d4ab9695` / `b3f4320b-1df2-43ee-bd04
     "page": 5,
     "crawler_provider": null,
     "pdf_extractor": "unpdf",
-    "score": 0.3333333432674408,
-    "snippet": "# arxiv.org"
+    "score": 0.2416989505290985,
+    "snippet": "## Page 5 output values. These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2. Multi-head attention allows the model to jointly attend to information from different repr"
   },
   {
     "kind": "pdf_document",
