@@ -19,7 +19,13 @@ __pycache__/
 .vscode/*
 !.vscode/settings.example.json
 !.vscode/extensions.json
-.claude/settings.local.json
+
+# Local agent/editor config (personal, not for the public repo)
+.claude/
+.mcp.json
+
+# Internal audit / QA reports (kept locally, not published)
+reports/internal/
 
 postgres-data/
 redis-data/

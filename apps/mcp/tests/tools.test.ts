@@ -11,6 +11,7 @@ import {
   memorySearch,
   memoryUpdate,
   research,
+  researchAndRemember,
   researchList,
   researchStatus,
   sourceGet,
@@ -74,6 +75,28 @@ function researchRun(overrides: Record<string, unknown> = {}) {
     created_at: '2026-05-20T00:00:00.000Z',
     updated_at: '2026-05-20T00:00:00.000Z',
     completed_at: null,
+    ...overrides,
+  };
+}
+
+function memory(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '00000000-0000-0000-0000-000000000020',
+    kind: 'procedural',
+    title: 'Research memory',
+    summary: 'Saved research evidence.',
+    body: 'body',
+    tags: ['research'],
+    directory: null,
+    file_overlap: [],
+    agent_origin: 'mnemis-mcp',
+    ttl_seconds: null,
+    expires_at: null,
+    archived_at: null,
+    has_embedding: true,
+    metadata: {},
+    created_at: '2026-05-20T00:00:00.000Z',
+    updated_at: '2026-05-20T00:00:00.000Z',
     ...overrides,
   };
 }
@@ -364,6 +387,82 @@ describe('research tools', () => {
     assert.equal(calls[1]!.url, `${BASE}/v1/research/runs?status=queued&limit=5`);
     assert.match(status.content[0]!.text, /indexed: 2/);
     assert.match(list.content[0]!.text, /Research runs/);
+  });
+
+  it('mnemis_research_and_remember chains memory, research, search and save', async () => {
+    const completedRun = researchRun({
+      status: 'completed',
+      result: {
+        indexed_sources: 1,
+        failed_sources: 0,
+        sources: [{ source_id: '00000000-0000-0000-0000-000000000030' }],
+      },
+      completed_at: '2026-05-20T00:01:00.000Z',
+    });
+    const responses = [
+      { query: 'q', mode: 'hybrid_rrf', items: [], count: 0 },
+      {
+        data: researchRun(),
+        job: {
+          id: 'job-1',
+          kind: 'research_run',
+          status: 'queued',
+          payload: {},
+          progress: {},
+          result: null,
+          error: null,
+          scheduled_at: '2026-05-20T00:00:00.000Z',
+          started_at: null,
+          completed_at: null,
+          attempts: 0,
+        },
+      },
+      { data: completedRun },
+      {
+        mode: 'markdown',
+        query: 'q',
+        retrieval: 'hybrid_rrf',
+        used_vector: true,
+        embedding_model: null,
+        embedding_tokens: 0,
+        reranked: false,
+        reranker_model: null,
+        reranker_tokens: 0,
+        count: 1,
+        items: [],
+        citations: [],
+        markdown: '# Results\n[1] indexed evidence',
+      },
+      { data: memory() },
+    ];
+    const { client, calls } = buildClient(() => ok(responses.shift()));
+
+    const result = await researchAndRemember(
+      { client },
+      {
+        query: 'best MCP research workflow',
+        waitMs: 500,
+        pollIntervalMs: 500,
+        maxSources: 1,
+        tags: ['research'],
+      },
+    );
+
+    assert.equal(calls[0]!.url, `${BASE}/v1/memories/semantic-search`);
+    assert.equal(calls[1]!.url, `${BASE}/v1/research/runs`);
+    assert.equal((calls[1]!.body as { includeGithub?: boolean }).includeGithub, true);
+    assert.equal(calls[2]!.url, `${BASE}/v1/research/runs/00000000-0000-0000-0000-000000000010`);
+    assert.equal(calls[3]!.url, `${BASE}/v1/search`);
+    assert.equal(calls[4]!.url, `${BASE}/v1/memories`);
+    assert.deepEqual((calls[4]!.body as { sourceIds: string[] }).sourceIds, [
+      '00000000-0000-0000-0000-000000000030',
+    ]);
+    assert.match(result.content[0]!.text, /Agent Research Workflow/);
+    assert.match(result.content[0]!.text, /Saved `00000000-0000-0000-0000-000000000020`/);
+    assert.deepEqual(result.structuredContent?.source_ids, [
+      '00000000-0000-0000-0000-000000000030',
+    ]);
+    assert.equal(result.structuredContent?.saved_memory_id, '00000000-0000-0000-0000-000000000020');
   });
 });
 

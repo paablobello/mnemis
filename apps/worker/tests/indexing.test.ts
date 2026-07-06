@@ -649,6 +649,7 @@ describe('index worker', () => {
           depth: 'quick',
           maxSources: 1,
           includeWeb: false,
+          includeGithub: false,
           includePapers: false,
           includePdfs: true,
           index: true,
@@ -698,6 +699,96 @@ describe('index worker', () => {
     assert.ok(indexedChunks.some((chunk) => chunk.rawText.includes('discover papers')));
   });
 
+  it('discovers GitHub repositories in research runs without seed URLs', async () => {
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      if (href.startsWith('https://api.github.com/search/repositories')) {
+        const search = new URL(href);
+        assert.equal(
+          search.searchParams.get('q'),
+          'model context protocol typescript sdk in:name,description,readme',
+        );
+        assert.equal(search.searchParams.has('sort'), false);
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                full_name: 'modelcontextprotocol/typescript-sdk',
+                html_url: 'https://github.com/modelcontextprotocol/typescript-sdk',
+                description: 'TypeScript SDK for the Model Context Protocol.',
+                stargazers_count: 12345,
+                default_branch: 'main',
+                language: 'TypeScript',
+                topics: ['mcp', 'typescript'],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('', { status: 404 });
+    };
+
+    const [run] = await db
+      .insert(researchRuns)
+      .values({
+        workspaceId,
+        query: 'model context protocol typescript sdk github repository',
+        depth: 'quick',
+        status: 'queued',
+        config: {
+          depth: 'quick',
+          maxSources: 1,
+          includeWeb: false,
+          includeGithub: true,
+          includePapers: false,
+          includePdfs: false,
+          index: false,
+          urls: [],
+        },
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'research_run',
+        payload: { research_run_id: run!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    const processed = await processOneJob(db);
+    assert.equal(processed, true);
+
+    const [updatedRun] = await db
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.id, run!.id))
+      .limit(1);
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+    const linkedSources = await db
+      .select()
+      .from(researchRunSources)
+      .where(eq(researchRunSources.researchRunId, run!.id));
+
+    assert.equal(updatedRun!.status, 'completed');
+    assert.equal(updatedJob!.status, 'completed');
+    assert.equal(linkedSources.length, 1);
+    assert.equal(linkedSources[0]!.status, 'skipped');
+    assert.equal((linkedSources[0]!.candidate as { provider?: string }).provider, 'github_search');
+
+    const [source] = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.id, linkedSources[0]!.sourceId))
+      .limit(1);
+    assert.equal(source!.kind, 'github_repo');
+    assert.equal(source!.identifier, 'modelcontextprotocol/typescript-sdk');
+    assert.equal((source!.config as { branch?: string }).branch, 'main');
+  });
+
   it('classifies arxiv-style PDF seed URLs as pdf_document sources', async () => {
     process.env.MNEMIS_PDF_EXTRACTOR_URL = 'https://pdf-sidecar.worker.test/extract';
     globalThis.fetch = async (url, init) => {
@@ -735,6 +826,7 @@ describe('index worker', () => {
           depth: 'quick',
           maxSources: 1,
           includeWeb: false,
+          includeGithub: false,
           includePapers: false,
           includePdfs: true,
           index: true,
@@ -844,6 +936,139 @@ describe('index worker', () => {
     );
     assert.ok(pageChunk);
     assert.equal((pageChunk.metadata as { pdf_extractor?: string }).pdf_extractor, 'sidecar');
+  });
+
+  it('deduplicates duplicate chunk locations before upsert', async () => {
+    process.env.MNEMIS_PDF_EXTRACTOR_URL = 'https://pdf-sidecar.worker.test/extract';
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      if (href === 'https://pdf.worker.test/duplicate-pages.pdf') {
+        return new Response(new TextEncoder().encode('%PDF duplicate page fixture'), {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'last-modified': 'Tue, 19 May 2026 10:00:00 GMT',
+          },
+        });
+      }
+      if (href === 'https://pdf-sidecar.worker.test/extract') {
+        assert.equal(init?.method, 'POST');
+        return new Response(
+          JSON.stringify({
+            title: 'Duplicate Page Paper',
+            pages: [
+              { page: 1, text: 'First duplicate page location.' },
+              { page: 1, text: 'Second duplicate page location.' },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('', { status: 404 });
+    };
+
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'pdf_document',
+        identifier: 'https://pdf.worker.test/duplicate-pages.pdf',
+        displayName: 'Duplicate page paper',
+        config: { pdfExtractor: 'sidecar', contextualPrefixMode: 'never' },
+        status: 'pending',
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'index_source',
+        payload: { source_id: source!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    const processed = await processOneJob(db);
+    assert.equal(processed, true);
+
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+    assert.equal(updatedJob!.status, 'completed');
+
+    const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
+    assert.equal(indexedChunks.length, 2);
+    assert.equal(
+      new Set(
+        indexedChunks.map(
+          (chunk) => `${chunk.sourceId}:${chunk.path}:${chunk.lineStart}:${chunk.lineEnd}`,
+        ),
+      ).size,
+      indexedChunks.length,
+    );
+    assert.ok(indexedChunks.some((chunk) => /duplicate page location/.test(chunk.rawText)));
+  });
+
+  it('strips null bytes from chunk text and metadata before upsert', async () => {
+    process.env.MNEMIS_PDF_EXTRACTOR_URL = 'https://pdf-sidecar.worker.test/extract';
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      if (href === 'https://pdf.worker.test/null-byte.pdf') {
+        return new Response(new TextEncoder().encode('%PDF null byte fixture'), {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'last-modified': 'Tue, 19 May 2026 10:00:00 GMT',
+          },
+        });
+      }
+      if (href === 'https://pdf-sidecar.worker.test/extract') {
+        assert.equal(init?.method, 'POST');
+        return new Response(
+          JSON.stringify({
+            title: 'Null Byte Paper',
+            pages: [{ page: 1, text: 'Null\u0000 byte text remains searchable.' }],
+            metadata: { note: 'contains\u0000null' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('', { status: 404 });
+    };
+
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId,
+        kind: 'pdf_document',
+        identifier: 'https://pdf.worker.test/null-byte.pdf',
+        displayName: 'Null byte paper',
+        config: { pdfExtractor: 'sidecar', contextualPrefixMode: 'never' },
+        status: 'pending',
+      })
+      .returning();
+
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        workspaceId,
+        kind: 'index_source',
+        payload: { source_id: source!.id },
+        scheduledAt: CLAIM_FIRST,
+      })
+      .returning();
+
+    const processed = await processOneJob(db);
+    assert.equal(processed, true);
+
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id)).limit(1);
+    assert.equal(updatedJob!.status, 'completed');
+
+    const indexedChunks = await db.select().from(chunks).where(eq(chunks.sourceId, source!.id));
+    assert.ok(indexedChunks.length >= 1);
+    assert.ok(indexedChunks.every((chunk) => !chunk.rawText.includes('\u0000')));
+    assert.ok(
+      indexedChunks.some((chunk) => (chunk.metadata as { note?: string }).note === 'containsnull'),
+    );
   });
 
   it('marks robots-blocked docs jobs as failed without crashing the worker', async () => {

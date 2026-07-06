@@ -192,6 +192,7 @@ export interface CreateResearchRunInput {
   depth?: ResearchDepth;
   maxSources?: number;
   includeWeb?: boolean;
+  includeGithub?: boolean;
   includePapers?: boolean;
   includePdfs?: boolean;
   index?: boolean;

@@ -11,7 +11,7 @@ You need:
 - **Docker** (for Postgres locally)
 
 ```bash
-git clone https://github.com/<org>/mnemis
+git clone https://github.com/paablobello/mnemis
 cd mnemis
 bun install
 cp .env.example .env

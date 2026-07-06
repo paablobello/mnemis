@@ -13,7 +13,7 @@ import {
   workspaces,
 } from '../packages/db/src/index.ts';
 
-const API_URL = process.env.MNEMIS_API_URL?.trim() || 'http://localhost:8787';
+const API_URL = process.env.MNEMIS_API_URL?.trim() || 'http://127.0.0.1:8787';
 const MCP_ENTRY = join(process.cwd(), 'apps/mcp/dist/index.js');
 const SOURCE_INDEX_TIMEOUT_MS = 90_000;
 const RESEARCH_TIMEOUT_MS = 90_000;
@@ -163,6 +163,7 @@ async function main(): Promise<void> {
         'source_status',
         'source_search',
         'mnemis_research',
+        'mnemis_research_and_remember',
         'mnemis_research_status',
         'mnemis_research_list',
       ];
@@ -240,6 +241,7 @@ async function main(): Promise<void> {
           depth: 'quick',
           maxSources: 1,
           includeWeb: false,
+          includeGithub: false,
           includePapers: false,
           includePdfs: true,
           index: true,

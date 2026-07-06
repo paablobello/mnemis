@@ -712,6 +712,7 @@ export async function createDashboardResearchRun(input: {
       depth,
       maxSources: depth === 'deep' ? 20 : 8,
       includeWeb: true,
+      includeGithub: true,
       includePapers: true,
       includePdfs: true,
       index: true,

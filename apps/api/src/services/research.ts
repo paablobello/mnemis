@@ -61,6 +61,7 @@ function researchConfig(input: CreateResearchRunInput): Record<string, unknown> 
     depth: input.depth,
     maxSources: input.maxSources,
     includeWeb: input.includeWeb,
+    includeGithub: input.includeGithub,
     includePapers: input.includePapers,
     includePdfs: input.includePdfs,
     index: input.index,

@@ -49,6 +49,7 @@ async function main() {
     depth: 'quick',
     maxSources: 3,
     includeWeb: false,
+    includeGithub: false,
     includePapers: false,
     includePdfs: true,
     index: true,

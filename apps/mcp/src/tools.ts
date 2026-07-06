@@ -20,6 +20,7 @@ export interface ToolContext {
 
 export type ToolResult = {
   content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 };
 
@@ -205,6 +206,44 @@ function renderSearchResponse(response: ChunkSearchResponse): ToolResult {
     );
   }
   return jsonText(response);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function boundedText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 40).trimEnd()}\n\n...[truncated ${value.length - max} chars]`;
+}
+
+function researchIndexedCount(run: ResearchRunDto): number {
+  const value = run.result?.indexed_sources;
+  return typeof value === 'number' ? value : 0;
+}
+
+function researchSourceIds(run: ResearchRunDto): string[] {
+  const entries = Array.isArray(run.result?.sources) ? run.result.sources : [];
+  return entries
+    .map((entry) => (entry && typeof entry === 'object' ? (entry as { source_id?: unknown }) : {}))
+    .map((entry) => entry.source_id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    .slice(0, 64);
+}
+
+function memoryHitLines(response: MemorySearchResponse): string {
+  if (response.items.length === 0) return '_No previous memories found._';
+  return response.items
+    .map((hit, index) => {
+      const memory = hit.memory;
+      return [
+        `### ${index + 1}. ${memory.title}`,
+        `_id: \`${memory.id}\` · kind: \`${memory.kind}\` · score: ${formatScore(hit.score)}_`,
+        '',
+        memory.summary,
+      ].join('\n');
+    })
+    .join('\n\n');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -464,7 +503,12 @@ export const researchInput = {
     .max(50)
     .optional()
     .describe('Seed URLs to force into the research run'),
-  includeWeb: z.boolean().optional().default(true).describe('Use web search providers'),
+  includeWeb: z.boolean().optional().default(true).describe('Use general web search providers'),
+  includeGithub: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Use GitHub repository discovery from the research query'),
   includePapers: z.boolean().optional().default(true).describe('Use academic paper providers'),
   includePdfs: z.boolean().optional().default(true).describe('Allow PDF sources'),
   index: z.boolean().optional().default(true).describe('Index discovered sources'),
@@ -478,6 +522,7 @@ export async function research(
     maxSources?: number;
     urls?: string[];
     includeWeb?: boolean;
+    includeGithub?: boolean;
     includePapers?: boolean;
     includePdfs?: boolean;
     index?: boolean;
@@ -519,6 +564,198 @@ export async function researchList(
 ): Promise<ToolResult> {
   const response = await ctx.client.research.list(input);
   return text(renderResearchRunList(response));
+}
+
+/* -------------------------------------------------------------------------- */
+/*  mnemis_research_and_remember                                               */
+/* -------------------------------------------------------------------------- */
+
+export const researchAndRememberInput = {
+  query: z.string().min(1).max(2_000).describe('Research question or topic'),
+  depth: z.enum(['quick', 'standard', 'deep']).optional().default('quick'),
+  maxSources: z.number().int().min(1).max(12).optional().default(4),
+  includeWeb: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Use general web discovery through configured search providers'),
+  includeGithub: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Use GitHub repository discovery for repo/code/library queries'),
+  includePapers: z.boolean().optional().default(true).describe('Use academic paper discovery'),
+  includePdfs: z.boolean().optional().default(true).describe('Allow PDF sources'),
+  urls: z.array(z.string().url()).max(20).optional().describe('Optional seed URLs'),
+  waitMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(300_000)
+    .optional()
+    .default(120_000)
+    .describe('How long to wait for indexing before returning. 0 returns immediately.'),
+  pollIntervalMs: z.number().int().min(500).max(10_000).optional().default(2_000),
+  searchLimit: z.number().int().min(1).max(20).optional().default(8),
+  memorySearchLimit: z.number().int().min(0).max(10).optional().default(3),
+  saveMemory: z.boolean().optional().default(true),
+  memoryKind: z.enum(['working', 'session', 'fact', 'procedural']).optional().default('procedural'),
+  memoryTitle: z.string().min(1).max(500).optional(),
+  tags: z.array(z.string().min(1).max(64)).max(64).optional(),
+  directory: z.string().max(1024).optional(),
+  agentOrigin: z.string().max(64).optional().default('mnemis-mcp'),
+};
+
+export async function researchAndRemember(
+  ctx: ToolContext,
+  input: {
+    query: string;
+    depth?: 'quick' | 'standard' | 'deep';
+    maxSources?: number;
+    includeWeb?: boolean;
+    includeGithub?: boolean;
+    includePapers?: boolean;
+    includePdfs?: boolean;
+    urls?: string[];
+    waitMs?: number;
+    pollIntervalMs?: number;
+    searchLimit?: number;
+    memorySearchLimit?: number;
+    saveMemory?: boolean;
+    memoryKind?: 'working' | 'session' | 'fact' | 'procedural';
+    memoryTitle?: string;
+    tags?: string[];
+    directory?: string;
+    agentOrigin?: string;
+  },
+): Promise<ToolResult> {
+  const memorySearchLimit = input.memorySearchLimit ?? 3;
+  const priorMemories =
+    memorySearchLimit > 0
+      ? await ctx.client.memories.semanticSearch({
+          query: input.query,
+          tags: input.tags,
+          directory: input.directory,
+          limit: memorySearchLimit,
+        })
+      : null;
+
+  const created = await ctx.client.research.create({
+    query: input.query,
+    depth: input.depth ?? 'quick',
+    maxSources: input.maxSources ?? 4,
+    includeWeb: input.includeWeb ?? true,
+    includeGithub: input.includeGithub ?? true,
+    includePapers: input.includePapers ?? true,
+    includePdfs: input.includePdfs ?? true,
+    index: true,
+    urls: input.urls ?? [],
+  });
+
+  let run = created.data;
+  const waitMs = input.waitMs ?? 120_000;
+  const deadline = Date.now() + waitMs;
+  while (waitMs > 0 && Date.now() < deadline) {
+    const response = await ctx.client.research.get(created.data.id);
+    run = response.data;
+    if (run.status === 'completed' || run.status === 'failed') break;
+    await sleep(input.pollIntervalMs ?? 2_000);
+  }
+
+  const sourceSearch =
+    run.status === 'completed' && researchIndexedCount(run) > 0
+      ? await ctx.client.search({
+          query: input.query,
+          mode: 'markdown',
+          limit: input.searchLimit ?? 8,
+        })
+      : null;
+  const sourceMarkdown =
+    sourceSearch?.mode === 'markdown' && sourceSearch.markdown
+      ? sourceSearch.markdown
+      : sourceSearch
+        ? JSON.stringify(sourceSearch, null, 2)
+        : '_Source search was not run because research has not completed with indexed sources._';
+
+  let savedMemory: MemoryDto | null = null;
+  if (input.saveMemory ?? true) {
+    const sourceIds = researchSourceIds(run);
+    const memoryTitle =
+      input.memoryTitle ?? `Research: ${input.query}`.replace(/\s+/g, ' ').slice(0, 500);
+    const memoryBody = boundedText(
+      [
+        `# ${memoryTitle}`,
+        '',
+        '## Query',
+        input.query,
+        '',
+        '## Research Run',
+        renderResearchRun(run),
+        '',
+        '## Prior Memories',
+        priorMemories ? memoryHitLines(priorMemories) : '_Memory pre-search disabled._',
+        '',
+        '## Indexed Evidence',
+        sourceMarkdown,
+      ].join('\n'),
+      180_000,
+    );
+    savedMemory = await ctx.client.memories.create({
+      kind: input.memoryKind ?? 'procedural',
+      title: memoryTitle,
+      summary:
+        run.status === 'completed'
+          ? `Research completed for "${input.query}" with ${researchIndexedCount(
+              run,
+            )} indexed sources and saved evidence for reuse.`
+          : `Research for "${input.query}" was saved with status ${run.status}.`,
+      body: memoryBody,
+      tags: input.tags ?? ['research'],
+      directory: input.directory,
+      agentOrigin: input.agentOrigin ?? 'mnemis-mcp',
+      sourceIds,
+      toolCalls: [
+        {
+          tool: 'mnemis_research_and_remember',
+          research_run_id: run.id,
+          research_status: run.status,
+          indexed_sources: researchIndexedCount(run),
+        },
+      ],
+      metadata: {
+        research_run_id: run.id,
+        research_status: run.status,
+        indexed_sources: researchIndexedCount(run),
+      },
+    });
+  }
+
+  const lines: string[] = ['# Agent Research Workflow', ''];
+  lines.push('## Prior Memories', priorMemories ? memoryHitLines(priorMemories) : '_Skipped._', '');
+  lines.push('## Research', renderResearchRun(run), '');
+  lines.push('## Indexed Evidence', boundedText(sourceMarkdown, 20_000), '');
+  if (savedMemory) {
+    lines.push(
+      '## Saved Memory',
+      `Saved \`${savedMemory.id}\` (${savedMemory.kind}) as **${savedMemory.title}**.`,
+      '',
+    );
+  }
+  if (run.status !== 'completed') {
+    lines.push(
+      '> Research did not complete during this call. Use `mnemis_research_status` and `source_search` later with the run id above.',
+    );
+  }
+  return {
+    ...text(lines.join('\n').trimEnd()),
+    structuredContent: {
+      research_run_id: run.id,
+      research_status: run.status,
+      indexed_sources: researchIndexedCount(run),
+      source_ids: researchSourceIds(run),
+      saved_memory_id: savedMemory?.id ?? null,
+    },
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -117,13 +117,28 @@ function asConfig(value: unknown): IndexSourceConfig {
 }
 
 function sanitizeOperationalError(error: unknown, max = 1_000): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message =
+    error instanceof Error
+      ? error.message.startsWith('Failed query:')
+        ? conciseDatabaseError(error)
+        : error.message
+      : String(error);
   return message
     .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s'"`]+/gi, '$1[redacted]')
     .replace(/(x-api-key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
     .replace(/(api[_-]?key['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
     .replace(/(token['":\s]+)[^,'"`\s]+/gi, '$1[redacted]')
     .slice(0, max);
+}
+
+function conciseDatabaseError(error: Error): string {
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message) return cause.message;
+  if (cause && typeof cause === 'object' && 'message' in cause) {
+    const message = (cause as { message?: unknown }).message;
+    if (typeof message === 'string' && message) return message;
+  }
+  return error.message.replace(/Failed query:[\s\S]*?(?:params:.*)?$/i, 'database_query_failed');
 }
 
 function completionProgress(result: Record<string, unknown>): Record<string, unknown> {
@@ -387,17 +402,17 @@ function chunkInsertValues(input: {
     workspaceId: input.workspaceId,
     sourceId: input.sourceId,
     parentId: chunk.parentKey ? input.parentIdsByKey?.get(chunk.parentKey) : undefined,
-    path: chunk.path,
+    path: stripPostgresNulls(chunk.path),
     lineStart: chunk.lineStart,
     lineEnd: chunk.lineEnd,
     page: chunk.page ?? null,
-    sectionPath: chunk.sectionPath,
-    rawText: chunk.rawText,
-    contextualPrefix: chunk.contextualPrefix,
-    language: chunk.language,
+    sectionPath: chunk.sectionPath.map(stripPostgresNulls),
+    rawText: stripPostgresNulls(chunk.rawText),
+    contextualPrefix: chunk.contextualPrefix ? stripPostgresNulls(chunk.contextualPrefix) : null,
+    language: chunk.language ? stripPostgresNulls(chunk.language) : chunk.language,
     embedding: chunk.embedding,
-    metadata: {
-      ...chunk.metadata,
+    metadata: sanitizeJsonbForPostgres({
+      ...sanitizeRecordForPostgres(chunk.metadata),
       index_run_id: input.runId,
       ...(input.commitSha ? { commit_sha: input.commitSha } : {}),
       ...(chunk.chunkKey ? { chunk_key: chunk.chunkKey } : {}),
@@ -408,9 +423,31 @@ function chunkInsertValues(input: {
             embedding_text_hash: chunk.embeddingTextHash,
           }
         : {}),
-    },
+    }),
     indexedAt: new Date(),
   }));
+}
+
+function stripPostgresNulls(value: string): string {
+  return value.split(String.fromCharCode(0)).join('');
+}
+
+function sanitizeJsonbForPostgres(value: unknown): unknown {
+  if (typeof value === 'string') return stripPostgresNulls(value);
+  if (Array.isArray(value)) return value.map(sanitizeJsonbForPostgres);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        stripPostgresNulls(key),
+        sanitizeJsonbForPostgres(item),
+      ]),
+    );
+  }
+  return value;
+}
+
+function sanitizeRecordForPostgres(value: Record<string, unknown>): Record<string, unknown> {
+  return sanitizeJsonbForPostgres(value) as Record<string, unknown>;
 }
 
 async function upsertChunkBatch(input: {
@@ -419,9 +456,10 @@ async function upsertChunkBatch(input: {
 }): Promise<number> {
   const batchSize = 250;
   let upserted = 0;
+  const values = dedupeChunkInsertValues(input.values);
 
-  for (let start = 0; start < input.values.length; start += batchSize) {
-    const batch = input.values.slice(start, start + batchSize);
+  for (let start = 0; start < values.length; start += batchSize) {
+    const batch = values.slice(start, start + batchSize);
     if (batch.length === 0) continue;
     await input.db
       .insert(chunks)
@@ -443,6 +481,18 @@ async function upsertChunkBatch(input: {
   }
 
   return upserted;
+}
+
+function chunkLocationKey(value: typeof chunks.$inferInsert): string {
+  return [value.sourceId, value.path, value.lineStart, value.lineEnd].join('\u0000');
+}
+
+function dedupeChunkInsertValues(
+  values: (typeof chunks.$inferInsert)[],
+): (typeof chunks.$inferInsert)[] {
+  const byLocation = new Map<string, typeof chunks.$inferInsert>();
+  for (const value of values) byLocation.set(chunkLocationKey(value), value);
+  return [...byLocation.values()];
 }
 
 async function loadParentIdsByKey(input: {
@@ -640,14 +690,42 @@ function canonicalRemoteIdentifier(identifier: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
+function githubFullNameFromCandidate(candidate: ResearchCandidate): string | null {
+  const fromMetadata = asRecord(candidate.metadata).githubFullName;
+  if (typeof fromMetadata === 'string' && fromMetadata.trim()) return fromMetadata.trim();
+  try {
+    const url = new URL(candidate.url);
+    if (url.hostname !== 'github.com') return null;
+    const [owner, repo] = url.pathname.split('/').filter(Boolean);
+    return owner && repo ? `${owner}/${repo}`.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function researchSourceIdentifier(candidate: ResearchCandidate): string {
+  if (candidate.kind === 'github_repo') {
+    const fullName = githubFullNameFromCandidate(candidate);
+    if (!fullName) throw new Error(`Invalid GitHub repository candidate: ${candidate.url}`);
+    return fullName;
+  }
+  return canonicalRemoteIdentifier(candidate.url);
+}
+
 function researchSourceConfig(input: {
   runQuery: string;
   candidate: ResearchCandidate;
 }): Record<string, unknown> {
+  const metadata = asRecord(input.candidate.metadata);
+  const defaultBranch = metadata.defaultBranch;
   return {
     title: input.candidate.title,
     sourceUrl: input.candidate.url,
     pdfUrl: input.candidate.pdfUrl,
+    branch:
+      input.candidate.kind === 'github_repo' && typeof defaultBranch === 'string'
+        ? defaultBranch
+        : undefined,
     maxPages: 1,
     respectRobots: true,
     pdfExtractor: 'auto',
@@ -675,7 +753,7 @@ async function ensureResearchSource(input: {
   runQuery: string;
   candidate: ResearchCandidate;
 }) {
-  const identifier = canonicalRemoteIdentifier(input.candidate.url);
+  const identifier = researchSourceIdentifier(input.candidate);
   const config = researchSourceConfig({
     runQuery: input.runQuery,
     candidate: input.candidate,

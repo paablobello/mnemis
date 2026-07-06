@@ -22,6 +22,8 @@ import {
   memoryUpdate,
   memoryUpdateInput,
   research,
+  researchAndRemember,
+  researchAndRememberInput,
   researchInput,
   researchList,
   researchListInput,
@@ -54,7 +56,7 @@ server.registerTool(
   'source_search',
   {
     description:
-      'Search indexed repositories and documentation. Returns markdown with citations and permalinks by default; pass mode="raw" for JSON chunks or mode="synthesized" for an LLM answer with citations.',
+      'Search the workspace knowledge base before answering questions about previously indexed repositories, docs, web pages, PDFs, or papers. Returns markdown with citations and permalinks by default; pass mode="raw" for JSON chunks or mode="synthesized" for an LLM answer with citations.',
     inputSchema: sourceSearchInput,
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
@@ -116,7 +118,7 @@ server.registerTool(
   'mnemis_research',
   {
     description:
-      'Run a full research workflow: discover web pages, academic papers and PDFs, then index the selected sources with citations.',
+      'Use when the user asks for fresh external research or how to solve an unfamiliar technical problem. Discovers web pages, academic papers and PDFs from the query even without seed URLs, then indexes selected sources with citations for later source_search and memory_save calls.',
     inputSchema: researchInput,
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
@@ -144,10 +146,21 @@ server.registerTool(
 );
 
 server.registerTool(
+  'mnemis_research_and_remember',
+  {
+    description:
+      'One-call agent workflow for unfamiliar or research-heavy tasks: search prior memories, discover and index fresh web/GitHub/paper/PDF sources, search indexed evidence, then save a reusable memory for future agents.',
+    inputSchema: researchAndRememberInput,
+  },
+  // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
+  (input: any) => researchAndRemember(ctx, input),
+);
+
+server.registerTool(
   'memory_save',
   {
     description:
-      'Persist a memory (fact/procedural/session/working). The chosen kind sets the default TTL (fact and procedural never expire).',
+      'Persist reusable agent memory after research, implementation decisions, project facts, or procedures. The chosen kind sets the default TTL (fact and procedural never expire).',
     inputSchema: memorySaveInput,
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown
@@ -158,7 +171,7 @@ server.registerTool(
   'memory_search',
   {
     description:
-      'Search memories. Hybrid Postgres full-text + vector when semantic=true (default), keyword-only when false.',
+      'Search previous agent memories before repeating research or project analysis. Hybrid Postgres full-text + vector when semantic=true (default), keyword-only when false.',
     inputSchema: memorySearchInput,
   },
   // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature uses unknown

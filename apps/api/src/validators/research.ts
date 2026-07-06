@@ -12,6 +12,7 @@ export const createResearchRunSchema = z
     depth: researchDepthSchema.optional().default('standard'),
     maxSources: z.number().int().min(1).max(50).optional().default(12),
     includeWeb: z.boolean().optional().default(true),
+    includeGithub: z.boolean().optional().default(true),
     includePapers: z.boolean().optional().default(true),
     includePdfs: z.boolean().optional().default(true),
     index: z.boolean().optional().default(true),
@@ -19,7 +20,12 @@ export const createResearchRunSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (!value.includeWeb && !value.includePapers && value.urls.length === 0) {
+    if (
+      !value.includeWeb &&
+      !value.includeGithub &&
+      !value.includePapers &&
+      value.urls.length === 0
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['includeWeb'],

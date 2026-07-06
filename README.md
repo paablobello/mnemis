@@ -21,7 +21,7 @@ Mnemis combines:
 ## Quick start
 
 ```bash
-git clone https://github.com/<org>/mnemis
+git clone https://github.com/paablobello/mnemis
 cd mnemis
 bun install
 cp .env.example .env
@@ -50,10 +50,14 @@ For full CLI and SDK usage, see [`docs/cli-sdk.md`](./docs/cli-sdk.md).
 
 For the strongest research workflow, configure at least one web search provider
 (`TAVILY_API_KEY` or `EXA_API_KEY`), `OPENALEX_EMAIL` for academic discovery,
+`GITHUB_TOKEN` or `MNEMIS_GITHUB_TOKEN` for higher GitHub Search limits,
 `FIRECRAWL_API_KEY` for high-quality web/docs crawling, and `VOYAGE_API_KEY` for
 embeddings. `SEMANTIC_SCHOLAR_API_KEY` is optional: without it, Semantic Scholar
 may return 429s and Mnemis will continue through OpenAlex/arXiv/Crossref where
-available.
+available. Research runs can enable or disable general web, GitHub repositories,
+academic papers, and PDFs independently (`includeWeb`, `includeGithub`,
+`includePapers`, `includePdfs`), which is useful for agent workflows such as
+repo-only or papers-only investigations.
 
 Text-rich PDFs work through the native extractor in `pdfExtractor=auto`. For
 sparse/scanned PDFs or highest-quality paper metadata, run the Docling/GROBID
@@ -83,7 +87,18 @@ needed provider keys are running:
 bun run qa:research:smoke
 bun run qa:research:deep
 bun run qa:mcp-live
+bun run qa:mcp-agent-research
 ```
+
+`qa:mcp-agent-research` is the closest check to the intended agent workflow: it
+connects through MCP, launches web, GitHub, and academic research without seed
+URLs, waits for indexing where applicable, searches the indexed corpus, then
+saves and retrieves a memory from the same MCP client.
+
+For agents, the highest-level MCP entrypoint is `mnemis_research_and_remember`:
+it searches prior memories, discovers and indexes fresh web/GitHub/paper/PDF
+sources, searches the indexed evidence, and saves a reusable memory in one tool
+call.
 
 For agent clients, prefer `bun run cli init` or the published `@mnemis/mcp`
 package entrypoint. Local dev wrappers such as `bun --filter @mnemis/mcp start`

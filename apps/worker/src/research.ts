@@ -1,10 +1,11 @@
 export type ResearchDepth = 'quick' | 'standard' | 'deep';
-export type ResearchSourceKind = 'web_page' | 'pdf_document' | 'academic_paper';
+export type ResearchSourceKind = 'github_repo' | 'web_page' | 'pdf_document' | 'academic_paper';
 
 export interface ResearchRunConfig {
   depth: ResearchDepth;
   maxSources: number;
   includeWeb: boolean;
+  includeGithub: boolean;
   includePapers: boolean;
   includePdfs: boolean;
   index: boolean;
@@ -17,7 +18,7 @@ export interface ResearchCandidate {
   title: string;
   snippet: string | null;
   provider: string;
-  sourceType: 'web' | 'paper' | 'pdf';
+  sourceType: 'github' | 'web' | 'paper' | 'pdf';
   score: number;
   pdfUrl?: string;
   doi?: string;
@@ -80,6 +81,9 @@ export function normalizeResearchRunConfig(value: unknown): ResearchRunConfig {
     depth: depthValue(config.depth),
     maxSources: positiveInt(config.maxSources, 12, 50),
     includeWeb: boolValue(config.includeWeb, true),
+    // Legacy configs used includeWeb for both web pages and GitHub repositories.
+    // Preserve old "includeWeb: false" behavior unless includeGithub is explicit.
+    includeGithub: boolValue(config.includeGithub, boolValue(config.includeWeb, true)),
     includePapers: boolValue(config.includePapers, true),
     includePdfs: boolValue(config.includePdfs, true),
     index: boolValue(config.index, true),
@@ -281,6 +285,80 @@ async function discoverWithBrave(query: string, limit: number): Promise<Research
         provider: 'brave',
         sourceType: isPdfUrl(normalized) ? 'pdf' : 'web',
         score: 900 - index,
+      },
+    ];
+  });
+}
+
+function githubSearchToken(): string | null {
+  return process.env.GITHUB_TOKEN?.trim() || process.env.MNEMIS_GITHUB_TOKEN?.trim() || null;
+}
+
+function githubIntentBoost(query: string): number {
+  return /\b(github|repo|repos|repository|repositories|source code|sdk|library|framework|package|starter|template|example|open source)\b/i.test(
+    query,
+  )
+    ? 300
+    : 0;
+}
+
+function githubBaseScore(query: string): number {
+  return githubIntentBoost(query) > 0 ? 820 : 620;
+}
+
+function githubRepositoryQuery(query: string): string {
+  const cleaned = query
+    .replace(/\b(source code|open source)\b/gi, ' ')
+    .replace(
+      /\b(github|repo|repos|repository|repositories|starter|template|example|examples)\b/gi,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length >= 3 ? cleaned : query.trim();
+}
+
+async function discoverWithGitHubRepositories(
+  query: string,
+  limit: number,
+): Promise<ResearchCandidate[]> {
+  const url = new URL('https://api.github.com/search/repositories');
+  url.searchParams.set('q', `${githubRepositoryQuery(query)} in:name,description,readme`);
+  url.searchParams.set('per_page', String(Math.min(limit, 10)));
+  const token = githubSearchToken();
+  const json = await fetchJson<Record<string, unknown>>(url.toString(), {
+    headers: {
+      accept: 'application/vnd.github+json',
+      'user-agent': 'MnemisResearchIndexer/0.1',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const items = Array.isArray(json.items) ? json.items : [];
+  return items.flatMap((item, index) => {
+    const row = asRecord(item);
+    const fullName = asString(row.full_name);
+    const htmlUrl = normalizeUrl(asString(row.html_url) ?? '');
+    if (!fullName || !htmlUrl) return [];
+    const stars = asNumber(row.stargazers_count) ?? 0;
+    const starScore = Math.min(Math.log10(stars + 1) * 35, 160);
+    const intentBoost = githubIntentBoost(query);
+    return [
+      {
+        kind: 'github_repo',
+        url: htmlUrl,
+        title: fullName,
+        snippet: asString(row.description),
+        provider: 'github_search',
+        sourceType: 'github',
+        score: githubBaseScore(query) + intentBoost + starScore - index,
+        metadata: {
+          githubFullName: fullName.toLowerCase(),
+          defaultBranch: asString(row.default_branch) ?? undefined,
+          stars,
+          language: asString(row.language) ?? undefined,
+          topics: asStringArray(row.topics) ?? undefined,
+          homepage: asString(row.homepage) ?? undefined,
+        },
       },
     ];
   });
@@ -489,6 +567,10 @@ async function discoverWithArxiv(query: string, limit: number): Promise<Research
 }
 
 function dedupeKey(candidate: ResearchCandidate): string {
+  if (candidate.kind === 'github_repo') {
+    const fullName = asString(asRecord(candidate.metadata).githubFullName);
+    if (fullName) return `github:${fullName.toLowerCase()}`;
+  }
   if (candidate.doi) return `doi:${candidate.doi.toLowerCase()}`;
   if (candidate.arxivId) return `arxiv:${candidate.arxivId.toLowerCase()}`;
   return `url:${normalizeUrl(candidate.pdfUrl ?? candidate.url) ?? candidate.url}`;
@@ -518,7 +600,17 @@ function rankCandidates(
     const previous = byKey.get(key);
     byKey.set(key, previous ? mergeCandidate(previous, candidate) : candidate);
   }
-  return [...byKey.values()].sort((a, b) => b.score - a.score).slice(0, config.maxSources);
+  return [...byKey.values()]
+    .sort((a, b) => candidateRankScore(b, config) - candidateRankScore(a, config))
+    .slice(0, config.maxSources);
+}
+
+function candidateRankScore(candidate: ResearchCandidate, config: ResearchRunConfig): number {
+  const hasPdf = Boolean(candidate.pdfUrl) || isPdfUrl(candidate.url);
+  let score = candidate.score;
+  if (config.includePdfs && hasPdf) score += 300;
+  if (candidate.sourceType === 'paper' && !hasPdf) score -= 250;
+  return score;
 }
 
 async function collectProvider(
@@ -548,6 +640,13 @@ export async function discoverResearchCandidates(input: {
   const issues: string[] = [];
   const limit = providerLimit(input.config);
   const candidates: ResearchCandidate[] = [...seedCandidates(input.config)];
+
+  if (input.config.includeGithub) {
+    const githubResults = await collectProvider(issues, 'github_search', () =>
+      discoverWithGitHubRepositories(input.query, limit),
+    );
+    candidates.push(...githubResults);
+  }
 
   if (input.config.includeWeb) {
     const webResults = await Promise.all([

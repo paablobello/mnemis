@@ -82,6 +82,7 @@ describe('research API', () => {
         depth: 'quick',
         maxSources: 3,
         includeWeb: false,
+        includeGithub: false,
         includePapers: false,
         urls: ['https://example.com/research'],
       }),
@@ -120,6 +121,7 @@ describe('research API', () => {
       body: JSON.stringify({
         query: 'no discovery',
         includeWeb: false,
+        includeGithub: false,
         includePapers: false,
         urls: [],
       }),
@@ -133,6 +135,29 @@ describe('research API', () => {
       .from(researchRuns)
       .where(eq(researchRuns.workspaceId, workspaceId));
     assert.ok(rows.length >= 1);
+  });
+
+  it('allows GitHub-only research discovery', async () => {
+    const res = await app.request('/v1/research/runs', {
+      method: 'POST',
+      headers: headersFor(RAW_KEY),
+      body: JSON.stringify({
+        query: 'model context protocol typescript sdk repository',
+        depth: 'quick',
+        maxSources: 1,
+        includeWeb: false,
+        includeGithub: true,
+        includePapers: false,
+        includePdfs: false,
+        index: false,
+      }),
+    });
+
+    assert.equal(res.status, 202);
+    const json = await res.json();
+    assert.equal(json.data.config.includeWeb, false);
+    assert.equal(json.data.config.includeGithub, true);
+    assert.equal(json.data.config.includePapers, false);
   });
 
   it('blocks expensive research runs when workspace credits are exhausted', async () => {
@@ -158,6 +183,7 @@ describe('research API', () => {
           depth: 'quick',
           maxSources: 3,
           includeWeb: false,
+          includeGithub: false,
           includePapers: false,
           urls: ['https://example.com/quota'],
         }),

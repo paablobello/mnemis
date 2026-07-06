@@ -58,7 +58,7 @@ Usage:
                         [--path-prefix <s>]
 
   mnemis research <query> [--depth quick|standard|deep] [--max-sources N]
-                          [--url <url>] [--no-web] [--no-papers]
+                          [--url <url>] [--no-web] [--no-github] [--no-papers]
                           [--no-pdfs] [--no-index]
   mnemis research list [--status queued|processing|completed|failed] [--limit N]
   mnemis research get <id>
@@ -438,6 +438,7 @@ export async function cmdResearchCreate(
       'max-sources': { type: 'string' },
       url: { type: 'string', multiple: true },
       'no-web': { type: 'boolean' },
+      'no-github': { type: 'boolean' },
       'no-papers': { type: 'boolean' },
       'no-pdfs': { type: 'boolean' },
       'no-index': { type: 'boolean' },
@@ -457,6 +458,7 @@ export async function cmdResearchCreate(
     maxSources,
     urls: values.url as string[] | undefined,
     includeWeb: values['no-web'] ? false : undefined,
+    includeGithub: values['no-github'] ? false : undefined,
     includePapers: values['no-papers'] ? false : undefined,
     includePdfs: values['no-pdfs'] ? false : undefined,
     index: values['no-index'] ? false : undefined,
